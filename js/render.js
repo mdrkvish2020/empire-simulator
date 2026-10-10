@@ -375,7 +375,22 @@ function render() {
     // 6. Battle counts
     const now = Date.now();
     battleMarkers = battleMarkers.filter(marker => marker.expiresAt > now);
-    if (zoom >= 1.5) battleMarkers.forEach(marker => {
+    const placedBattleLabels = new Map();
+    const battleLabelGroupSize = 96;
+    const battleLabelCollisionCellSize = 64;
+    const nearbyBattleLabels = (x, y) => {
+        const gridX = Math.floor(x / battleLabelCollisionCellSize);
+        const gridY = Math.floor(y / battleLabelCollisionCellSize);
+        const nearby = [];
+        for (let offsetY = -2; offsetY <= 2; offsetY++) {
+            for (let offsetX = -2; offsetX <= 2; offsetX++) {
+                const labels = placedBattleLabels.get(`${gridX + offsetX},${gridY + offsetY}`);
+                if (labels) nearby.push(...labels);
+            }
+        }
+        return nearby;
+    };
+    if (zoom >= 2.5) battleMarkers.forEach(marker => {
         const nationA = nations[marker.nationAId];
         const nationB = nations[marker.nationBId];
         if (!nationA || !nationB || !Array.isArray(marker.frontFlags)) return;
@@ -389,12 +404,68 @@ function render() {
         marker.frontFlags = activeFronts;
         if (activeFronts.length === 0) return;
 
+        const frontGroups = new Map();
+        activeFronts.forEach(front => {
+            const centerX = (front.nationAX + front.nationBX) / 2;
+            const centerY = (front.nationAY + front.nationBY) / 2;
+            const groupKey =
+                `${Math.floor(centerX / battleLabelGroupSize)},` +
+                `${Math.floor(centerY / battleLabelGroupSize)}`;
+            if (!frontGroups.has(groupKey)) frontGroups.set(groupKey, []);
+            frontGroups.get(groupKey).push(front);
+        });
+        if (!marker._battleLabelStates) marker._battleLabelStates = {};
+        const activeGroupKeys = new Set(frontGroups.keys());
+        Object.keys(marker._battleLabelStates).forEach(key => {
+            if (!activeGroupKeys.has(key)) delete marker._battleLabelStates[key];
+        });
+
+        frontGroups.forEach((groupFronts, groupKey) => {
+        const activeFronts = groupFronts;
+        const labelState = marker._battleLabelStates[groupKey] ||
+            (marker._battleLabelStates[groupKey] = {});
+
+        const findLocalTerritoryCenter = (nationId, borderX, borderY) => {
+            const nearbyTiles = [];
+            let totalWeight = 0;
+            let weightedX = 0;
+            let weightedY = 0;
+            const searchRadius = 12;
+            for (let y = Math.max(0, Math.floor(borderY) - searchRadius);
+                y <= Math.min(HEIGHT - 1, Math.floor(borderY) + searchRadius); y++) {
+                for (let x = Math.max(0, Math.floor(borderX) - searchRadius);
+                    x <= Math.min(WIDTH - 1, Math.floor(borderX) + searchRadius); x++) {
+                    if (territory[y][x] !== nationId) continue;
+                    const distance = Math.hypot(x + 0.5 - borderX, y + 0.5 - borderY);
+                    const weight = 1 / (1 + distance * 0.12);
+                    const tile = { x: x + 0.5, y: y + 0.5 };
+                    nearbyTiles.push(tile);
+                    weightedX += tile.x * weight;
+                    weightedY += tile.y * weight;
+                    totalWeight += weight;
+                }
+            }
+            if (nearbyTiles.length === 0) return null;
+            const centerX = weightedX / totalWeight;
+            const centerY = weightedY / totalWeight;
+            return nearbyTiles.reduce((nearest, tile) =>
+                Math.hypot(tile.x - centerX, tile.y - centerY) <
+                    Math.hypot(nearest.x - centerX, nearest.y - centerY)
+                    ? tile
+                    : nearest
+            );
+        };
+
         let totalWeight = 0;
-        let weightedX = 0;
-        let weightedY = 0;
+        let targetAX = 0;
+        let targetAY = 0;
+        let targetBX = 0;
+        let targetBY = 0;
         let weightedNormalX = 0;
         let weightedNormalY = 0;
-        let newestFront = activeFronts[0];
+        let newestNormalX = 0;
+        let newestNormalY = 1;
+        let newestFrontAt = -Infinity;
         activeFronts.forEach(front => {
             const age = now - front.updatedAt;
             const weight = 1 - Math.min(0.75, age / 4000);
@@ -405,49 +476,97 @@ function render() {
             const normalX = frontBX - frontAX;
             const normalY = frontBY - frontAY;
             const normalLength = Math.hypot(normalX, normalY) || 1;
-            weightedX += (frontAX + frontBX) * 0.5 * weight;
-            weightedY += (frontAY + frontBY) * 0.5 * weight;
+            const borderX = (frontAX + frontBX) / (2 * cellW);
+            const borderY = (frontAY + frontBY) / (2 * cellH);
+            const anchorA = findLocalTerritoryCenter(nationA.id, borderX, borderY);
+            const anchorB = findLocalTerritoryCenter(nationB.id, borderX, borderY);
+            if (!anchorA || !anchorB) return;
+            targetAX += anchorA.x * weight;
+            targetAY += anchorA.y * weight;
+            targetBX += anchorB.x * weight;
+            targetBY += anchorB.y * weight;
             weightedNormalX += normalX / normalLength * weight;
             weightedNormalY += normalY / normalLength * weight;
             totalWeight += weight;
-            if (front.updatedAt > newestFront.updatedAt) newestFront = front;
+            if (front.updatedAt > newestFrontAt) {
+                newestNormalX = normalX / normalLength;
+                newestNormalY = normalY / normalLength;
+                newestFrontAt = front.updatedAt;
+            }
         });
-        const targetCenterX = weightedX / totalWeight;
-        const targetCenterY = weightedY / totalWeight;
+        if (totalWeight === 0) return;
+        targetAX /= totalWeight;
+        targetAY /= totalWeight;
+        targetBX /= totalWeight;
+        targetBY /= totalWeight;
         let averageNormalLength = Math.hypot(weightedNormalX, weightedNormalY);
         if (averageNormalLength < totalWeight * 0.15) {
-            const newestAX = newestFront.nationAX * cellW;
-            const newestAY = newestFront.nationAY * cellH;
-            weightedNormalX = newestFront.nationBX * cellW - newestAX;
-            weightedNormalY = newestFront.nationBY * cellH - newestAY;
-            averageNormalLength = Math.hypot(weightedNormalX, weightedNormalY) || 1;
+            weightedNormalX = newestNormalX;
+            weightedNormalY = newestNormalY;
         }
-        const normalUnitX = weightedNormalX / averageNormalLength;
-        const normalUnitY = weightedNormalY / averageNormalLength;
-        let targetLabelAngle = Math.atan2(normalUnitY, normalUnitX) + Math.PI / 2;
+        const normalLength = Math.hypot(weightedNormalX, weightedNormalY) || 1;
+        const normalUnitX = weightedNormalX / normalLength;
+        const normalUnitY = weightedNormalY / normalLength;
+        let targetLabelAngle = Math.atan2(weightedNormalY, weightedNormalX) + Math.PI / 2;
         if (targetLabelAngle > Math.PI / 2) targetLabelAngle -= Math.PI;
         if (targetLabelAngle < -Math.PI / 2) targetLabelAngle += Math.PI;
 
-        if (!Number.isFinite(marker.labelX) || !Number.isFinite(marker.labelY) ||
-            !Number.isFinite(marker.labelAngle)) {
-            marker.labelX = targetCenterX;
-            marker.labelY = targetCenterY;
-            marker.labelAngle = targetLabelAngle;
+        if (!Number.isFinite(labelState.labelAX) || !Number.isFinite(labelState.labelAY) ||
+            !Number.isFinite(labelState.labelBX) || !Number.isFinite(labelState.labelBY) ||
+            !Number.isFinite(labelState.labelAngle)) {
+            labelState.labelAX = targetAX * cellW;
+            labelState.labelAY = targetAY * cellH;
+            labelState.labelBX = targetBX * cellW;
+            labelState.labelBY = targetBY * cellH;
+            labelState.labelAngle = targetLabelAngle;
         } else {
-            const elapsed = marker.labelUpdatedAt ? Math.max(0, now - marker.labelUpdatedAt) : 0;
+            const elapsed = labelState.updatedAt ? Math.max(0, now - labelState.updatedAt) : 0;
             const easing = 1 - Math.exp(-elapsed / 300);
-            marker.labelX += (targetCenterX - marker.labelX) * easing;
-            marker.labelY += (targetCenterY - marker.labelY) * easing;
-            let angleDifference = targetLabelAngle - marker.labelAngle;
+            labelState.labelAX += (targetAX * cellW - labelState.labelAX) * easing;
+            labelState.labelAY += (targetAY * cellH - labelState.labelAY) * easing;
+            labelState.labelBX += (targetBX * cellW - labelState.labelBX) * easing;
+            labelState.labelBY += (targetBY * cellH - labelState.labelBY) * easing;
+            let angleDifference = targetLabelAngle - labelState.labelAngle;
             if (angleDifference > Math.PI / 2) angleDifference -= Math.PI;
             if (angleDifference < -Math.PI / 2) angleDifference += Math.PI;
-            marker.labelAngle += angleDifference * easing;
-            if (marker.labelAngle > Math.PI / 2) marker.labelAngle -= Math.PI;
-            if (marker.labelAngle < -Math.PI / 2) marker.labelAngle += Math.PI;
+            labelState.labelAngle += angleDifference * easing;
+            if (labelState.labelAngle > Math.PI / 2) labelState.labelAngle -= Math.PI;
+            if (labelState.labelAngle < -Math.PI / 2) labelState.labelAngle += Math.PI;
         }
-        marker.labelUpdatedAt = now;
-        const centerX = marker.labelX;
-        const centerY = marker.labelY;
+        labelState.updatedAt = now;
+        const keepLabelInNation = (nationId, x, y) => {
+            const tileX = Math.floor(x / cellW);
+            const tileY = Math.floor(y / cellH);
+            if (tileX >= 0 && tileX < WIDTH && tileY >= 0 && tileY < HEIGHT &&
+                territory[tileY][tileX] === nationId) return { x, y };
+
+            let nearest = null;
+            const mapX = x / cellW;
+            const mapY = y / cellH;
+            const searchRadius = 8;
+            for (let candidateY = Math.max(0, Math.floor(mapY) - searchRadius);
+                candidateY <= Math.min(HEIGHT - 1, Math.floor(mapY) + searchRadius); candidateY++) {
+                for (let candidateX = Math.max(0, Math.floor(mapX) - searchRadius);
+                    candidateX <= Math.min(WIDTH - 1, Math.floor(mapX) + searchRadius); candidateX++) {
+                    if (territory[candidateY][candidateX] !== nationId) continue;
+                    const distance = Math.hypot(candidateX + 0.5 - mapX, candidateY + 0.5 - mapY);
+                    if (!nearest || distance < nearest.distance) {
+                        nearest = {
+                            x: (candidateX + 0.5) * cellW,
+                            y: (candidateY + 0.5) * cellH,
+                            distance
+                        };
+                    }
+                }
+            }
+            return nearest || { x, y };
+        };
+        const safeLabelA = keepLabelInNation(nationA.id, labelState.labelAX, labelState.labelAY);
+        const safeLabelB = keepLabelInNation(nationB.id, labelState.labelBX, labelState.labelBY);
+        labelState.labelAX = safeLabelA.x;
+        labelState.labelAY = safeLabelA.y;
+        labelState.labelBX = safeLabelB.x;
+        labelState.labelBY = safeLabelB.y;
 
         const flagSize = Math.max(10 / zoom, Math.min(cellW, cellH) * 0.9);
         const flagPoleHeight = flagSize * 0.9;
@@ -494,14 +613,8 @@ function render() {
             );
         });
 
-        const mapCenterX = centerX / cellW;
-        const mapCenterY = centerY / cellH;
-        if (mapCenterX < minX - 2 || mapCenterX > maxX + 2 ||
-            mapCenterY < minY - 2 || mapCenterY > maxY + 2) return;
-        const labelAngle = marker.labelAngle;
-        const fontSize = 22 / zoom;
-        const labelGap = 4 / zoom;
-        const labelOffset = Math.max(Math.min(cellW, cellH) * 0.5, (fontSize + labelGap) / 2);
+        const labelAngle = labelState.labelAngle;
+        const fontSize = Math.max(6, Math.min(10, 8 / Math.sqrt(zoom)));
         CTR.save();
         CTR.font = `bold ${fontSize}px sans-serif`;
         CTR.textAlign = 'center';
@@ -509,30 +622,72 @@ function render() {
 
         [
             {
-                x: centerX - normalUnitX * labelOffset,
-                y: centerY - normalUnitY * labelOffset,
+                x: labelState.labelAX,
+                y: labelState.labelAY,
+                nationId: nationA.id,
                 troops: nationATroops,
                 color: nationA.color
             },
             {
-                x: centerX + normalUnitX * labelOffset,
-                y: centerY + normalUnitY * labelOffset,
+                x: labelState.labelBX,
+                y: labelState.labelBY,
+                nationId: nationB.id,
                 troops: nationBTroops,
                 color: nationB.color
             }
         ].forEach(label => {
+            const mapX = label.x / cellW;
+            const mapY = label.y / cellH;
+            if (mapX < minX - 2 || mapX > maxX + 2 ||
+                mapY < minY - 2 || mapY > maxY + 2) return;
+            const text = label.troops.toLocaleString('en-US');
+            const radius = Math.max(fontSize, CTR.measureText(text).width * 0.5);
+            let bestPosition = { x: label.x, y: label.y, score: Infinity };
+            const searchRadius = 8;
+            for (let candidateY = Math.max(0, Math.floor(mapY) - searchRadius);
+                candidateY <= Math.min(HEIGHT - 1, Math.floor(mapY) + searchRadius); candidateY++) {
+                for (let candidateX = Math.max(0, Math.floor(mapX) - searchRadius);
+                    candidateX <= Math.min(WIDTH - 1, Math.floor(mapX) + searchRadius); candidateX++) {
+                    if (territory[candidateY][candidateX] !== label.nationId) continue;
+                    const x = (candidateX + 0.5) * cellW;
+                    const y = (candidateY + 0.5) * cellH;
+                    const displacement = Math.hypot(x - label.x, y - label.y);
+                    const overlaps = nearbyBattleLabels(x, y).filter(placed =>
+                        Math.hypot(x - placed.x, y - placed.y) < radius + placed.radius + 2
+                    ).length;
+                    const score = displacement + overlaps * (cellW + cellH) * 20;
+                    if (score < bestPosition.score) bestPosition = { x, y, score };
+                }
+            }
+            if (label.nationId === nationA.id) {
+                labelState.labelAX = bestPosition.x;
+                labelState.labelAY = bestPosition.y;
+            } else {
+                labelState.labelBX = bestPosition.x;
+                labelState.labelBY = bestPosition.y;
+            }
+            const collisionGridKey =
+                `${Math.floor(bestPosition.x / battleLabelCollisionCellSize)},` +
+                `${Math.floor(bestPosition.y / battleLabelCollisionCellSize)}`;
+            if (!placedBattleLabels.has(collisionGridKey)) placedBattleLabels.set(collisionGridKey, []);
+            placedBattleLabels.get(collisionGridKey).push({
+                x: bestPosition.x,
+                y: bestPosition.y,
+                radius
+            });
             CTR.save();
-            CTR.translate(label.x, label.y);
+            CTR.translate(bestPosition.x, bestPosition.y);
             CTR.rotate(labelAngle);
             CTR.lineJoin = 'round';
             CTR.strokeStyle = '#000000';
-            CTR.lineWidth = 4 / zoom;
-            CTR.strokeText(label.troops.toLocaleString('en-US'), 0, 0);
+            CTR.lineWidth = 2.5;
+            CTR.strokeText(text, 0, 0);
             CTR.fillStyle = '#ffffff';
-            CTR.fillText(label.troops.toLocaleString('en-US'), 0, 0);
+            CTR.fillText(text, 0, 0);
             CTR.restore();
         });
         CTR.restore();
+        });
     });
 
     // 7. Floating World Notifications
