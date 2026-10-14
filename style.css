@@ -2081,3 +2081,51 @@ body { overflow: hidden; }
     .nation-popout { top: 56px; max-height: 42dvh; }
     #leaderboard-modal { top: 56px; max-height: 70dvh; }
 }
+
+/* Keep the touch HUD compact even when desktop HUD preferences are saved. */
+@media (max-width: 760px) {
+    #nation-panel {
+        left: 50% !important;
+        right: auto !important;
+        top: auto !important;
+        bottom: max(8px, env(safe-area-inset-bottom)) !important;
+        width: min(520px, calc(100vw - 16px)) !important;
+        height: auto !important;
+        max-width: calc(100vw - 16px) !important;
+        max-height: 30dvh !important;
+        overflow: auto !important;
+        transform: translateX(-50%) !important;
+        padding: 8px 10px !important;
+    }
+    #nation-panel.is-minimized { width: min(380px, calc(100vw - 16px)) !important; }
+    #nation-panel .game-panel-header { margin-bottom: 4px; gap: 8px; }
+    #nation-panel .game-panel-header h2 { font-size: .95rem; }
+    #nation-panel .section-title { font-size: .65rem; }
+    #nation-panel .btn { min-height: 38px; padding: 6px 8px; font-size: .68rem; }
+    #nation-panel input, #nation-panel select { min-height: 36px; padding: 5px 7px; }
+    #nation-panel .panel-hint { font-size: .64rem; margin: 3px 0; }
+    #nation-panel .nation-stats { gap: 4px; }
+    #selected-nation-details {
+        left: 8px !important; right: auto !important; top: 104px !important; bottom: auto !important;
+        width: min(360px, calc(100vw - 16px)) !important; height: auto !important;
+        max-width: calc(100vw - 16px) !important; max-height: 32dvh !important;
+        overflow: auto !important; transform: none !important; padding: 10px !important;
+    }
+    #leaderboard-modal {
+        left: 8px !important; right: auto !important; top: 104px !important; bottom: auto !important;
+        width: min(360px, calc(100vw - 16px)) !important; height: auto !important;
+        max-width: calc(100vw - 16px) !important; max-height: 45dvh !important;
+        overflow: auto !important; transform: none !important;
+    }
+}
+@media (max-width: 520px) {
+    #nation-panel { max-height: 26dvh !important; }
+    #nation-panel.is-minimized { max-height: 64px !important; }
+    #selected-nation-details, #leaderboard-modal { top: 104px !important; }
+    #game-toolbar { top: 56px; }
+}
+@media (max-height: 520px) and (orientation: landscape) and (max-width: 900px) {
+    #nation-panel { width: min(480px, 50vw) !important; max-height: 32dvh !important; }
+    #nation-panel.is-minimized { max-height: 58px !important; }
+    #selected-nation-details, #leaderboard-modal { top: 54px !important; max-height: 44dvh !important; }
+}
