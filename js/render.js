@@ -133,20 +133,25 @@ function render() {
         }
     }
 
-    if (placementMode === 'naval' && nations[playerNationId]) {
+    if ((placementMode === 'naval' || placementMode === 'carrack') && nations[playerNationId]) {
         const player = nations[playerNationId];
         CTR.lineWidth = Math.max(1.5, 2 / zoom);
-        CTR.strokeStyle = 'rgba(56, 189, 248, 0.95)';
+        CTR.strokeStyle = placementMode === 'carrack' ? 'rgba(245, 158, 11, 0.95)' : 'rgba(56, 189, 248, 0.95)';
         for (let y = minY; y <= maxY; y++) {
             for (let x = minX; x <= maxX; x++) {
                 if (grid[y][x] !== 1 || !window.isCoastal(x, y)) continue;
                 const ownerId = territory[y][x];
                 const owner = ownerId === null ? null : nations[ownerId];
-                const validTarget = ownerId === null ||
+                const validTarget = placementMode === 'naval' && (ownerId === null ||
                     (owner && ownerId !== player.id &&
                         player.wars?.[ownerId] !== undefined &&
                         !(player.allianceId != null && player.allianceId === owner.allianceId) &&
-                        !(player.peaceTreaties?.[ownerId] > 0));
+                        !(player.peaceTreaties?.[ownerId] > 0) && !(owner.carracks > 0))) ||
+                    (placementMode === 'carrack' && owner && ownerId !== player.id &&
+                        player.wars?.[ownerId] !== undefined &&
+                        !(player.allianceId != null && player.allianceId === owner.allianceId) &&
+                        !(player.peaceTreaties?.[ownerId] > 0) &&
+                        (owner.carracks > 0 || ships.some(ship => ship.nationId === ownerId)));
                 if (validTarget) CTR.strokeRect(x * cellW + 0.25, y * cellH + 0.25, cellW - 0.5, cellH - 0.5);
             }
         }
@@ -309,7 +314,7 @@ function render() {
     });
 
     // 4. Render Ships
-    ships.forEach(ship => {
+    const drawTransportBoat = ship => {
         let n = nations[ship.nationId];
         if (!n || ship.path.length < 2) return;
 
@@ -334,7 +339,54 @@ function render() {
         CTR.arc(sx, sy, Math.max(2.5, cellW * 0.8), 0, Math.PI * 2);
         CTR.fill();
         CTR.stroke();
-    });
+    };
+    ships.forEach(drawTransportBoat);
+
+    const drawCarrack = ship => {
+        const n = nations[ship.nationId];
+        if (!n || ship.path.length < 2) return;
+        const index = Math.min(Math.floor(ship.progress), ship.path.length - 1);
+        const from = ship.path[index];
+        const to = ship.path[Math.min(index + 1, ship.path.length - 1)];
+        const progress = ship.progress - index;
+        const mapX = from.x + (to.x - from.x) * progress;
+        const mapY = from.y + (to.y - from.y) * progress;
+        if (mapX < minX || mapX > maxX || mapY < minY || mapY > maxY) return;
+        const sx = (mapX + 0.5) * cellW;
+        const sy = (mapY + 0.5) * cellH;
+        const size = Math.max(7, cellW * 2.8);
+        const heading = Math.atan2(to.y - from.y, to.x - from.x);
+
+        CTR.save();
+        CTR.translate(sx, sy);
+        CTR.rotate(heading);
+        CTR.fillStyle = '#293744';
+        CTR.strokeStyle = "#ffffff";
+        CTR.lineWidth = Math.max(1, cellW * 0.16);
+        CTR.beginPath();
+        CTR.moveTo(-size * 1.25, -size * 0.48);
+        CTR.lineTo(size * 0.55, -size * 0.48);
+        CTR.lineTo(size * 1.25, 0);
+        CTR.lineTo(size * 0.55, size * 0.48);
+        CTR.lineTo(-size * 1.25, size * 0.48);
+        CTR.closePath();
+        CTR.fill();
+        CTR.stroke();
+        CTR.fillStyle = n.color;
+        CTR.fillRect(-size * 0.8, -size * 0.36, size * 0.72, size * 0.72);
+        CTR.fillStyle = '#aebbc4';
+        CTR.fillRect(-size * 0.05, -size * 0.3, size * 0.58, size * 0.6);
+        CTR.fillStyle = '#101820';
+        CTR.beginPath();
+        CTR.arc(size * 0.12, 0, size * 0.2, 0, Math.PI * 2);
+        CTR.fill();
+        CTR.beginPath();
+        CTR.moveTo(size * 0.12, 0);
+        CTR.lineTo(size * 0.55, 0);
+        CTR.stroke();
+        CTR.restore();
+    };
+    carrackShips.forEach(drawCarrack);
 
     // 5. Country Name Labels
     if (mapMode !== 'income') {
@@ -395,7 +447,8 @@ function render() {
         const nationB = nations[marker.nationBId];
         if (!nationA || !nationB || !Array.isArray(marker.frontFlags)) return;
 
-        const troopProgress = Math.min(1, (now - marker.troopTransitionAt) / 600);
+        const rawTroopProgress = Math.min(1, (now - marker.troopTransitionAt) / 800);
+        const troopProgress = rawTroopProgress * rawTroopProgress * (3 - 2 * rawTroopProgress);
         const nationATroops = Math.round(marker.previousNationATroops +
             (marker.nationATroops - marker.previousNationATroops) * troopProgress);
         const nationBTroops = Math.round(marker.previousNationBTroops +
@@ -640,10 +693,13 @@ function render() {
             const mapY = label.y / cellH;
             if (mapX < minX - 2 || mapX > maxX + 2 ||
                 mapY < minY - 2 || mapY > maxY + 2) return;
-            const text = label.troops.toLocaleString('en-US');
+            const text = new Intl.NumberFormat('en-US', {
+                notation: 'compact',
+                maximumFractionDigits: label.troops >= 10000 ? 1 : 0
+            }).format(label.troops);
             const radius = Math.max(fontSize, CTR.measureText(text).width * 0.5);
             let bestPosition = { x: label.x, y: label.y, score: Infinity };
-            const searchRadius = 8;
+            const searchRadius = 16;
             for (let candidateY = Math.max(0, Math.floor(mapY) - searchRadius);
                 candidateY <= Math.min(HEIGHT - 1, Math.floor(mapY) + searchRadius); candidateY++) {
                 for (let candidateX = Math.max(0, Math.floor(mapX) - searchRadius);
@@ -655,7 +711,7 @@ function render() {
                     const overlaps = nearbyBattleLabels(x, y).filter(placed =>
                         Math.hypot(x - placed.x, y - placed.y) < radius + placed.radius + 2
                     ).length;
-                    const score = displacement + overlaps * (cellW + cellH) * 20;
+                    const score = displacement + overlaps * (cellW + cellH) * 50;
                     if (score < bestPosition.score) bestPosition = { x, y, score };
                 }
             }
@@ -678,9 +734,18 @@ function render() {
             CTR.save();
             CTR.translate(bestPosition.x, bestPosition.y);
             CTR.rotate(labelAngle);
+            const labelWidth = CTR.measureText(text).width;
+            const labelHeight = fontSize + 5;
+            CTR.fillStyle = 'rgba(8, 12, 20, 0.82)';
+            CTR.strokeStyle = label.color;
+            CTR.lineWidth = 1.25;
+            CTR.beginPath();
+            CTR.roundRect(-labelWidth / 2 - 3, -labelHeight / 2, labelWidth + 6, labelHeight, 4);
+            CTR.fill();
+            CTR.stroke();
             CTR.lineJoin = 'round';
             CTR.strokeStyle = '#000000';
-            CTR.lineWidth = 2.5;
+            CTR.lineWidth = 1.5;
             CTR.strokeText(text, 0, 0);
             CTR.fillStyle = '#ffffff';
             CTR.fillText(text, 0, 0);

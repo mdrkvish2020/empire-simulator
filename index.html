@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ages of Conflict - Realistic Terrain Expansion & Diplomatic Treaties</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>empire-simulator</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -56,7 +56,7 @@
         <div id="turn-controls-panel" class="hud-customizable">
             <div class="turn-controls">
                 <button class="btn active" id="btn-pause" onclick="setSpeed(0)">⏸ Pause</button>
-                <button class="btn" id="btn-play" onclick="setSpeed(2)">▶ Play</button>
+                <button class="btn" id="btn-play" onclick="setSpeed(1)">▶ Play</button>
             </div>
         </div>
         <div id="speed-controls-panel" class="hud-customizable">
@@ -64,9 +64,9 @@
             <div class="utility-dropdown" id="speed-dropdown" hidden>
                 <div class="section-title">Simulation Speed</div>
                 <div class="btn-group">
-                    <button class="btn" id="btn-1x" onclick="setSpeed(1)">0.5x</button>
-                    <button class="btn" id="btn-2x" onclick="setSpeed(2)">1x</button>
-                    <button class="btn" id="btn-5x" onclick="setSpeed(5)">2x</button>
+                    <button class="btn" id="btn-1x" onclick="setSpeed(1)">1x</button>
+                    <button class="btn" id="btn-2x" onclick="setSpeed(2)">2x</button>
+                    <button class="btn" id="btn-5x" onclick="setSpeed(5)">5x</button>
                 </div>
             </div>
         </div>
@@ -87,9 +87,12 @@
                 <div class="game-panel-header">
                     <div>
                         <div class="section-title">Empire Command</div>
-                        <h2>Ages of Conflict</h2>
+                        <h2>empire-simulator</h2>
                     </div>
-                    <span class="status-pill" id="sim-status-pill">PAUSED</span>
+                    <div class="game-panel-header-actions">
+                        <span class="status-pill" id="sim-status-pill">PAUSED</span>
+                        <button class="panel-collapse-button" id="nation-panel-toggle" type="button" aria-label="Minimize nation controls" aria-expanded="true" aria-controls="player-controls nation-selection-hint" title="Minimize nation controls">−</button>
+                    </div>
                 </div>
                 <p class="panel-hint" id="nation-selection-hint">Select a nation on the map. Its details appear above; press Play as Nation to begin.</p>
             </div>
@@ -98,6 +101,16 @@
                     <div class="player-command-column player-recruit-column">
                         <div>
                             <div class="section-title">Recruit Troops</div>
+                            <div class="auto-army-manager">
+                                <div class="section-title">Auto Army Manager · Maintain troop minimums</div>
+                                <div class="auto-army-row">
+                                    <label>Attack<input class="number-input auto-army-target" data-troop-target="attack" type="number" min="0" step="1" placeholder="Off" aria-label="Minimum attack troops"></label>
+                                    <label>Defense<input class="number-input auto-army-target" data-troop-target="defend" type="number" min="0" step="1" placeholder="Off" aria-label="Minimum defense troops"></label>
+                                    <label>Balanced<input class="number-input auto-army-target" data-troop-target="balanced" type="number" min="0" step="1" placeholder="Off" aria-label="Minimum balanced troops"></label>
+                                </div>
+                                <p class="panel-hint">Automatically recruits to each minimum when your treasury can afford it.</p>
+                            </div>
+                            <div id="economy-emergency" class="economy-emergency" role="status" hidden></div>
                             <div class="recruit-row">
                                 <input class="number-input" id="recruit-quantity" type="number" min="1" step="1" value="20000" aria-label="Number of troops">
                                 <button class="btn recruit-button" data-troop="attack">⚔ Recruit Attack</button>
@@ -107,8 +120,11 @@
                             <p class="panel-hint" id="recruit-cost-estimate"></p>
                         </div>
                         <button class="btn" id="expand-territory-button" aria-pressed="false">Expansion Off</button>
-                        <button class="btn" id="send-boat-button">Choose Boat Destination</button>
+                        <button class="btn" id="send-boat-button">Send Boat</button>
                         <p class="panel-hint" id="naval-status" aria-live="polite"></p>
+                        <button class="btn" id="build-carrack-button">Build Carrack · $100,000</button>
+                        <button class="btn" id="send-carrack-button">Send Carrack to Attack</button>
+                        <p class="panel-hint" id="carrack-status" aria-live="polite"></p>
                     </div>
                     <div class="player-command-column player-city-column">
                         <button class="btn" id="build-city-button">Build City</button>
@@ -120,6 +136,7 @@
                                 </select>
                                 <button class="btn" id="upgrade-city-button">Upgrade</button>
                             </div>
+                            <label class="auto-city-upgrader"><input id="auto-city-upgrader" type="checkbox"> Automatically upgrade my lowest-level city</label>
                         </div>
                     </div>
                 </div>
@@ -142,6 +159,10 @@
                         <div id="player-treaties" class="treaty-list"></div>
                         <div id="player-peace-requests" class="player-peace-requests"></div>
                     </div>
+                    <div class="alliance-membership" id="alliance-membership" hidden>
+                        <span id="player-alliance-name"></span>
+                        <button class="btn btn-danger" id="leave-alliance-button" type="button">Leave Alliance</button>
+                    </div>
                 </div>
                 <p class="panel-hint action-message" id="player-action-message" aria-live="polite"></p>
             </div>
@@ -163,6 +184,15 @@
         </div>
         <div id="modal-leaderboard-list"></div>
     </div>
+</div>
+
+<div id="device-gate" role="dialog" aria-modal="true" aria-labelledby="device-gate-title" hidden>
+    <section class="device-gate-card">
+        <div class="subtitle">Empire Simulator</div>
+        <h2 id="device-gate-title">Play in landscape, full screen</h2>
+        <p id="device-gate-message">Rotate your device to landscape, then enter full screen to continue.</p>
+        <button class="btn btn-success" id="device-gate-action" type="button">Enter full screen</button>
+    </section>
 </div>
 
 <div class="menu-backdrop" id="settings-overlay" hidden>
@@ -243,7 +273,7 @@
 
 <div class="menu-backdrop" id="main-menu-overlay">
     <section class="main-menu-card">
-        <div class="subtitle">Ages of Conflict</div>
+        <div class="subtitle">empire-simulator</div>
         <h2 id="main-menu-title">Choose Your Nation</h2>
         <p id="main-menu-description">The world is ready. Select a nation on the map, then press Play as Nation to begin the simulation.</p>
         <label class="menu-world-label" for="mapPresetSelect">World map</label>
@@ -269,6 +299,7 @@
         </div>
         <div class="main-menu-actions">
             <button class="btn" id="settings-menu-button">⚙ Settings</button>
+            <button class="btn" id="menu-tutorial">Tutorial</button>
             <button class="btn btn-success" id="menu-choose-nation">Choose a Nation</button>
             <button class="btn" id="menu-resume" hidden>Resume Game</button>
             <button class="btn" id="menu-new-game" hidden>New Game</button>
@@ -278,6 +309,47 @@
 </div>
 
 <!-- Scripts loaded in dependency order -->
+<div class="menu-backdrop tutorial-backdrop" id="tutorial-overlay" hidden>
+    <section class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-copy">
+        <header class="tutorial-header">
+            <div>
+                <div class="subtitle">Field Guide</div>
+                <h2 id="tutorial-title">Your Empire, Your Choices</h2>
+            </div>
+            <button class="close-btn" id="tutorial-close" type="button" aria-label="Close tutorial">×</button>
+        </header>
+        <div class="tutorial-progress" aria-live="polite">
+            <span id="tutorial-step-count">Step 1 of 7</span>
+            <div class="tutorial-progress-track"><span id="tutorial-progress-fill"></span></div>
+        </div>
+        <h3 id="tutorial-step-title"></h3>
+        <p id="tutorial-copy"></p>
+        <p class="tutorial-tip" id="tutorial-tip"></p>
+        <footer class="tutorial-actions">
+            <button class="btn" id="tutorial-skip" type="button">Skip tutorial</button>
+            <div class="tutorial-step-actions">
+                <button class="btn" id="tutorial-back" type="button">Back</button>
+                <button class="btn btn-success" id="tutorial-next" type="button">Next</button>
+            </div>
+        </footer>
+    </section>
+</div>
+
+<div class="menu-backdrop outcome-backdrop" id="outcome-overlay" hidden>
+    <section class="outcome-card" role="dialog" aria-modal="true" aria-labelledby="outcome-title" aria-describedby="outcome-description">
+        <div class="outcome-emblem" id="outcome-emblem" aria-hidden="true">★</div>
+        <div class="subtitle" id="outcome-eyebrow">Campaign Complete</div>
+        <h2 id="outcome-title">Domination Victory</h2>
+        <p id="outcome-description"></p>
+        <div class="outcome-stats" id="outcome-stats"></div>
+        <div class="outcome-actions">
+            <button class="btn btn-success" id="outcome-continue" type="button">Continue Watching</button>
+            <button class="btn" id="outcome-menu" type="button">Game Menu</button>
+            <button class="btn" id="outcome-new-game" type="button">New World</button>
+        </div>
+    </section>
+</div>
+
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>
 <script src="js/map.js"></script>
@@ -286,6 +358,7 @@
 <script src="js/simulation.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/save-load.js"></script>
+<script src="js/device.js"></script>
 
 </body>
 </html>

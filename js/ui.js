@@ -35,10 +35,144 @@ const DEFAULT_SHORTCUTS = {
     'play-pause': 'Space',
     speed: ']'
 };
+const TUTORIAL_COMPLETED_KEY = 'agesOfConflictTutorialCompleted';
+const TUTORIAL_STEPS = [
+    {
+        title: 'Choose and inspect a nation',
+        copy: 'Before a campaign begins, click a colored nation to inspect it and press Play as Nation. During a game, clicking another country opens its intelligence and diplomatic actions.',
+        tip: 'A new campaign starts paused and begins with a short protected peace period after you take command.'
+    },
+    {
+        title: 'Read your command panel',
+        copy: 'The panel shows your treasury, yearly net income, land, cities, army, military strength, personality, and current year. Gold pays for troops, cities, and upgrades.',
+        tip: 'Income from land and cities is reduced by army upkeep and city maintenance.'
+    },
+    {
+        title: 'Set a comfortable pace',
+        copy: 'Use Pause and Play to control the simulation. The default 1x pace is the former slower 0.5x setting. Open Speed for 2x or 5x when you want to move through years faster.',
+        tip: 'The game continues simulating while it runs, so pause whenever you want time to plan.'
+    },
+    {
+        title: 'Grow your economy and borders',
+        copy: 'Build cities on your own land to increase income, then upgrade them for a stronger local boost. Expansion Off leaves land growth to the other nations; turn it on when you want your nation to claim nearby territory automatically.',
+        tip: 'City placement requires enough gold and open space from other cities.'
+    },
+    {
+        title: 'Recruit troops and sail',
+        copy: 'Set minimums for attack, defense, and balanced troops in the Auto Army Manager, or recruit manually below it. Boats carry troops to colonies and enemy coasts. Send carracks to clear enemy carracks and boats before landing.',
+        tip: 'Carracks cost $100,000 and $500 per year to maintain. Enemy carracks can repel boats until their fleet is cleared.'
+    },
+    {
+        title: 'Choose friends and rivals',
+        copy: 'Select another nation to request an alliance, join an eligible alliance, send or request gold, declare war, or offer a peace treaty with a payment. Other nations make their own diplomatic decisions.',
+        tip: 'An active peace treaty prevents renewed fighting for a limited time.'
+    },
+    {
+        title: 'Aim for domination',
+        copy: 'Win by controlling at least 75% of the world’s land. If your nation is destroyed, you are defeated, but you can still watch the simulation continue.',
+        tip: 'Use the leaderboard and map views to compare territory, alliances, income, armies, and cities.'
+    }
+];
 const hudFontBases = new WeakMap();
 const hudButtonBases = new WeakMap();
 let hudSettings = loadStoredSettings(HUD_SETTINGS_KEY, DEFAULT_HUD_SETTINGS);
 let gameShortcuts = loadStoredSettings(SHORTCUTS_KEY, DEFAULT_SHORTCUTS);
+let tutorialStepIndex = 0;
+let tutorialResumeAfterClose = false;
+let tutorialResumeSpeed = 1;
+let tutorialCompletedThisSession = false;
+let displayedPlayerOutcome = null;
+
+function renderTutorialStep() {
+    const step = TUTORIAL_STEPS[tutorialStepIndex];
+    document.getElementById('tutorial-step-count').textContent = `Step ${tutorialStepIndex + 1} of ${TUTORIAL_STEPS.length}`;
+    document.getElementById('tutorial-progress-fill').style.width = `${((tutorialStepIndex + 1) / TUTORIAL_STEPS.length) * 100}%`;
+    document.getElementById('tutorial-step-title').textContent = step.title;
+    document.getElementById('tutorial-copy').textContent = step.copy;
+    document.getElementById('tutorial-tip').textContent = step.tip;
+    document.getElementById('tutorial-back').disabled = tutorialStepIndex === 0;
+    document.getElementById('tutorial-next').textContent = tutorialStepIndex === TUTORIAL_STEPS.length - 1 ? 'Finish' : 'Next';
+}
+
+function openTutorial(resumeGameOnClose = false) {
+    tutorialStepIndex = 0;
+    tutorialResumeAfterClose = resumeGameOnClose && gameStarted && !playerOutcome && simSpeed > 0;
+    tutorialResumeSpeed = simSpeed > 0 ? simSpeed : lastRunningSpeed;
+    renderTutorialStep();
+    document.getElementById('tutorial-overlay').hidden = false;
+    if (tutorialResumeAfterClose) setSpeed(0);
+}
+
+function closeTutorial() {
+    document.getElementById('tutorial-overlay').hidden = true;
+    tutorialCompletedThisSession = true;
+    try {
+        localStorage.setItem(TUTORIAL_COMPLETED_KEY, 'true');
+    } catch (error) {
+        console.warn('Could not save tutorial completion.', error);
+    }
+    if (tutorialResumeAfterClose && gameStarted && !playerOutcome) setSpeed(tutorialResumeSpeed);
+    tutorialResumeAfterClose = false;
+}
+
+function shouldShowFirstRunTutorial() {
+    if (tutorialCompletedThisSession) return false;
+    try {
+        return localStorage.getItem(TUTORIAL_COMPLETED_KEY) !== 'true';
+    } catch (error) {
+        return true;
+    }
+}
+
+function resetPlayerOutcomeScreen() {
+    displayedPlayerOutcome = null;
+    document.getElementById('outcome-overlay').hidden = true;
+}
+
+function updatePlayerOutcomeScreen() {
+    if (!playerOutcome || displayedPlayerOutcome === playerOutcome) return;
+    displayedPlayerOutcome = playerOutcome;
+
+    const victory = playerOutcome === 'victory' || playerOutcome === 'alliance-victory';
+    const allianceVictory = playerOutcome === 'alliance-victory';
+    const card = document.querySelector('.outcome-card');
+    const nation = nations[playerNationId];
+    const totalLand = Object.values(nations).reduce((sum, item) => sum + item.tiles.length, 0);
+    const alliance = allianceVictory && nation?.allianceId != null ? alliances[nation.allianceId] : null;
+    const controlledLand = alliance
+        ? [...new Set(alliance.members)].map(id => nations[id]).filter(Boolean).reduce((sum, member) => sum + member.tiles.length, 0)
+        : nation?.tiles.length || 0;
+    const landShare = totalLand > 0 ? Math.round((controlledLand / totalLand) * 100) : 0;
+    card.dataset.outcome = playerOutcome;
+    document.getElementById('outcome-eyebrow').textContent = victory ? 'Campaign Complete' : 'Campaign Ended';
+    document.getElementById('outcome-title').textContent = allianceVictory ? 'Alliance Victory' : victory ? 'Domination Victory' : 'Defeat';
+    document.getElementById('outcome-emblem').textContent = victory ? '★' : '×';
+    document.getElementById('outcome-description').textContent = victory
+        ? allianceVictory
+            ? `${alliance?.name || 'Your alliance'} controls ${landShare}% of the world’s land and has won the campaign.`
+            : `${playerNationName || nation?.name || 'Your nation'} controls ${landShare}% of the world’s land and has won the campaign.`
+        : `${playerNationName || 'Your nation'} has fallen in year ${year}. You can continue watching the other nations compete.`;
+    document.getElementById('outcome-continue').textContent = victory ? 'Continue Watching' : 'Watch the World Continue';
+
+    const stats = document.getElementById('outcome-stats');
+    stats.replaceChildren();
+    const addStat = (label, value) => {
+        const item = document.createElement('div');
+        item.className = 'outcome-stat';
+        const caption = document.createElement('span');
+        caption.textContent = label;
+        const number = document.createElement('strong');
+        number.textContent = value;
+        item.append(caption, number);
+        stats.appendChild(item);
+    };
+    addStat('Year', String(year));
+    addStat('Land control', `${landShare}%`);
+    if (nation) addStat('Cities', String(cities.filter(city => city.nationId === nation.id).length));
+
+    document.getElementById('outcome-overlay').hidden = false;
+    if (simSpeed > 0) setSpeed(0);
+}
 
 function loadStoredSettings(storageKey, defaults) {
     const merged = JSON.parse(JSON.stringify(defaults));
@@ -244,7 +378,6 @@ function updateRecruitmentEstimate() {
 function updateNationPanel() {
     const player = nations[playerNationId];
     const selectionHint = document.getElementById('nation-selection-hint');
-    const selectionSection = document.getElementById('nation-selection');
     const selected = nations[selectedNationId];
     const details = document.getElementById('selected-nation-details');
     const controls = document.getElementById('player-controls');
@@ -252,8 +385,7 @@ function updateNationPanel() {
     const nationPopout = document.getElementById('selected-nation-details');
     const showSelectedDetails = Boolean(selected) && (!player || selected.id !== player.id);
 
-    selectionSection.hidden = playerNationId !== null;
-    selectionHint.hidden = Boolean(selected) || Boolean(player);
+    selectionHint.hidden = Boolean(selected) || Boolean(player) || Boolean(playerOutcome);
     details.hidden = !showSelectedDetails;
     controls.hidden = !player && !playerOutcome;
     nationPopout.hidden = !showSelectedDetails;
@@ -294,6 +426,20 @@ function updateNationPanel() {
         document.getElementById('player-strength').textContent = `${calculateNationPower(player).toFixed(1)}x`;
         document.getElementById('player-archetype').textContent = player.archetype.type;
         document.getElementById('player-year').textContent = String(year);
+        const emergency = document.getElementById('economy-emergency');
+        const runway = player.netIncome < 0 ? player.gold / Math.abs(player.netIncome) : Infinity;
+        const atRisk = player.netIncome < 0 && (runway <= 10 || player.gold < Math.max(1000, player.maintenance * 2));
+        emergency.hidden = !atRisk;
+        emergency.textContent = atRisk
+            ? `⚠ EMERGENCY: Your treasury is shrinking by $${Math.abs(player.netIncome).toLocaleString()}/year. At this rate, funds may run out in about ${Math.max(0, Math.ceil(runway))} years.`
+            : '';
+        document.querySelectorAll('.auto-army-target').forEach(input => {
+            input.disabled = !player || Boolean(playerOutcome);
+            if (document.activeElement !== input) {
+                const target = player.autoArmyTargets?.[input.dataset.troopTarget];
+                input.value = Number.isSafeInteger(target) ? target : '';
+            }
+        });
     } else if (playerOutcome) {
         document.getElementById('player-nation-name').textContent = `👑 ${playerNationName || 'Your nation'} — ${playerOutcome.toUpperCase()}`;
         ['player-gold', 'player-income', 'player-land', 'player-cities', 'player-army', 'player-strength', 'player-archetype'].forEach(id => {
@@ -317,22 +463,39 @@ function updateNationPanel() {
     const sendBoatButton = document.getElementById('send-boat-button');
     const navalStatus = document.getElementById('naval-status');
     const activePlayerShips = player ? ships.filter(ship => ship.nationId === player.id).length : 0;
+    const activePlayerCarracks = player ? carrackShips.filter(ship => ship.nationId === player.id).length : 0;
+    const playerHasPatrollingCarrack = player && carrackShips.some(ship => ship.nationId === player.id && ship.patrol);
     const playerHasCoast = player && player.tiles.some(tile => window.isCoastal(tile.x, tile.y));
+    const playerCarracks = player ? player.carracks || 0 : 0;
     const remainingNavalCooldown = player && player.lastNavalLaunch
         ? Math.max(0, NAVAL_LAUNCH_COOLDOWN_TICKS - (year - player.lastNavalLaunch))
         : 0;
     sendBoatButton.disabled = !hasPlayer || !playerHasCoast ||
         player.army.attack + player.army.balanced < 8 ||
         activePlayerShips >= MAX_SHIPS_PER_NATION || remainingNavalCooldown > 0;
-    sendBoatButton.textContent = placementMode === 'naval' ? 'Cancel Destination' : 'Choose Boat Destination';
+    sendBoatButton.textContent = placementMode === 'naval' ? 'Cancel Destination' : 'Send Boat';
     sendBoatButton.classList.toggle('active', placementMode === 'naval');
     navalStatus.textContent = placementMode === 'naval' ? 'Click your chosen destination on the map.' :
         !playerHasCoast ? 'No coastal territory for a launch.' :
         player && player.army.attack + player.army.balanced < 8 ? 'Requires 8 attack or balanced troops.' :
             activePlayerShips >= MAX_SHIPS_PER_NATION ? `${activePlayerShips}/${MAX_SHIPS_PER_NATION} boats already sailing.` :
                 remainingNavalCooldown > 0 ? `Next launch available in ${remainingNavalCooldown} years.` :
-                    activePlayerShips > 0 ? `${activePlayerShips} boat${activePlayerShips === 1 ? '' : 's'} at sea.` :
-                        'Launch a colony or naval invasion expedition.';
+                    'Boats carry troops; hostile coasts must be cleared of carracks first.';
+    const buildCarrackButton = document.getElementById('build-carrack-button');
+    buildCarrackButton.disabled = !hasPlayer || !playerHasCoast || player.gold < CARRACK_COST;
+    document.getElementById('carrack-status').textContent = !playerHasCoast
+        ? 'Carracks require a coastal territory.'
+        : `${playerCarracks} carrack${playerCarracks === 1 ? '' : 's'} · annual maintenance $${(playerCarracks * CARRACK_MAINTENANCE).toLocaleString()}.`;
+    const sendCarrackButton = document.getElementById('send-carrack-button');
+    sendCarrackButton.disabled = !hasPlayer || !playerHasCoast || playerCarracks <= 0 ||
+        (activePlayerCarracks >= MAX_SHIPS_PER_NATION && !playerHasPatrollingCarrack);
+    sendCarrackButton.textContent = placementMode === 'carrack'
+        ? 'Cancel Carrack Attack'
+        : playerHasPatrollingCarrack ? 'Redirect Warship' : 'Send Carrack to Attack';
+    sendCarrackButton.classList.toggle('active', placementMode === 'carrack');
+    if (placementMode === 'carrack') {
+        document.getElementById('carrack-status').textContent = 'Choose an enemy coast with carracks or boats to attack.';
+    }
     const treatyList = document.getElementById('player-treaties');
     treatyList.replaceChildren();
     if (player) {
@@ -367,12 +530,19 @@ function updateNationPanel() {
         : (playerCities[0] ? String(playerCities[0].id) : null);
     citySelect.value = selectedCityId || '';
     const upgradeCityButton = document.getElementById('upgrade-city-button');
+    const autoCityUpgrader = document.getElementById('auto-city-upgrader');
+    autoCityUpgrader.checked = Boolean(player?.autoCityUpgrader);
+    autoCityUpgrader.disabled = !hasPlayer;
     const selectedCity = playerCities.find(city => String(city.id) === String(selectedCityId));
     const upgradeCost = selectedCity ? getCityUpgradeCost(selectedCity) : Infinity;
     upgradeCityButton.textContent = selectedCity
-        ? selectedCity.level >= 100 ? `${selectedCity.name} · Max Level` : `Upgrade City · $${upgradeCost}`
+        ? selectedCity.level >= 100 ? `${selectedCity.name} · Max Level` : `Upgrade City · $${upgradeCost.toLocaleString()}`
         : 'Upgrade City';
     upgradeCityButton.disabled = !hasPlayer || !selectedCity || selectedCity.level >= 100 || player.gold < upgradeCost;
+    const allianceMembership = document.getElementById('alliance-membership');
+    const playerAlliance = player?.allianceId != null ? alliances[player.allianceId] : null;
+    allianceMembership.hidden = !hasPlayer || !playerAlliance;
+    document.getElementById('player-alliance-name').textContent = playerAlliance ? playerAlliance.name : '';
     updateRecruitmentEstimate();
     document.querySelectorAll('.recruit-button').forEach(button => {
         const type = button.dataset.troop;
@@ -475,7 +645,7 @@ function updateNationPanel() {
         offerList.appendChild(card);
     });
     offerList.hidden = incomingOffers.length === 0;
-
+    updatePlayerOutcomeScreen();
 }
 
 function selectNation(nationId) {
@@ -483,6 +653,21 @@ function selectNation(nationId) {
     selectedNationId = nationId;
     updateNationPanel();
 }
+
+function setNationPanelMinimized(minimized) {
+    const panel = document.getElementById('nation-panel');
+    const toggle = document.getElementById('nation-panel-toggle');
+    panel.classList.toggle('is-minimized', minimized);
+    toggle.setAttribute('aria-expanded', String(!minimized));
+    toggle.setAttribute('aria-label', minimized ? 'Expand nation controls' : 'Minimize nation controls');
+    toggle.title = minimized ? 'Expand nation controls' : 'Minimize nation controls';
+    toggle.textContent = minimized ? '+' : '−';
+}
+
+document.getElementById('nation-panel-toggle').addEventListener('click', () => {
+    const panel = document.getElementById('nation-panel');
+    setNationPanelMinimized(!panel.classList.contains('is-minimized'));
+});
 
 function playAsSelectedNation() {
     if (playerNationId !== null || playerOutcome || !nations[selectedNationId]) return;
@@ -500,9 +685,10 @@ function playAsSelectedNation() {
     document.getElementById('menu-resume').hidden = false;
     document.getElementById('menu-new-game').hidden = false;
     document.getElementById('menu-close').hidden = false;
-    setSpeed(2);
+    setSpeed(lastRunningSpeed);
     updateNationPanel();
     render();
+    if (shouldShowFirstRunTutorial()) openTutorial(true);
 }
 
 function togglePlacementMode(mode) {
@@ -511,7 +697,9 @@ function togglePlacementMode(mode) {
     if (placementMode === 'city') {
         setPlayerActionMessage(`Build City costs $${getNewCityCost(nations[playerNationId])}. Click a highlighted tile to place it.`);
     } else if (placementMode === 'naval') {
-        setPlayerActionMessage('Choose an unclaimed coast, or an enemy coast you are at war with, as the boat destination. Press Escape to cancel.');
+        setPlayerActionMessage('Choose an unclaimed coast or a coast held by an enemy you are at war with. Boats carry 8 troops and are repelled by defending carracks.');
+    } else if (placementMode === 'carrack') {
+        setPlayerActionMessage('Choose an enemy coast to send your carrack after its fleet.');
     } else {
         setPlayerActionMessage('');
     }
@@ -522,10 +710,26 @@ function togglePlacementMode(mode) {
 function actOnMapTile(x, y) {
     const player = nations[playerNationId];
     if (placementMode && player && !playerOutcome) {
+        if (placementMode === 'carrack') {
+            const mission = launchCarrackAttack(player.id, x, y);
+            if (!mission) {
+                setPlayerActionMessage('No carrack can reach that enemy coast, or the enemy has no carracks or boats there.');
+                return;
+            }
+            placementMode = null;
+            setPlayerActionMessage(`Carrack dispatched to clear ${nations[mission.enemyId]?.name || 'the enemy'} fleet. Send boats after the coast is cleared.`);
+            updateNationPanel();
+            updateLeaderboard();
+            render();
+            return;
+        }
         if (placementMode === 'naval') {
             const expedition = launchNavalExpedition(player.id, x, y);
             if (!expedition) {
-                setPlayerActionMessage('No sea route reaches that destination. Choose a reachable unclaimed coast or a nation you are at war with.');
+                const defender = nations[territory[y]?.[x]];
+                setPlayerActionMessage(defender?.carracks > 0
+                    ? `Enemy carracks still defend ${defender.name}. Send your carrack to clear them before landing a boat.`
+                    : 'No sea route reaches that destination. Choose a reachable unclaimed coast or an enemy you are at war with.');
                 return;
             }
             placementMode = null;
@@ -533,7 +737,7 @@ function actOnMapTile(x, y) {
             const targetName = expedition.type === 'invasion' && nations[targetOwner]
                 ? nations[targetOwner].name
                 : 'uncharted land';
-            setPlayerActionMessage(`Boat launched toward ${targetName}. 8 troops were assigned to the expedition.`);
+            setPlayerActionMessage(`Boat dispatched toward ${targetName} with 8 troops.`);
             updateNationPanel();
             updateLeaderboard();
             render();
@@ -776,17 +980,41 @@ CANVAS.addEventListener('wheel', (e) => {
     animateCamera();
 }, { passive: false });
 
-CANVAS.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
-    if (cameraAnimationFrame !== null) cancelAnimationFrame(cameraAnimationFrame);
-    cameraAnimationFrame = null;
-    targetPanX = panX;
-    targetPanY = panY;
-    targetZoom = zoom;
-    isDragging = true;
-    hasDragged = false;
+const activeMapPointers = new Map();
+let pinchStart = null;
+let pointerDownPosition = null;
+
+CANVAS.addEventListener('pointerdown', event => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    CANVAS.setPointerCapture(event.pointerId);
     const rect = CANVAS.getBoundingClientRect();
-    dragStart = { x: e.clientX - rect.left - panX, y: e.clientY - rect.top - panY };
+    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    activeMapPointers.set(event.pointerId, point);
+    pointerDownPosition = point;
+    hasDragged = false;
+    if (activeMapPointers.size === 1) {
+        if (cameraAnimationFrame !== null) cancelAnimationFrame(cameraAnimationFrame);
+        cameraAnimationFrame = null;
+        targetPanX = panX;
+        targetPanY = panY;
+        targetZoom = zoom;
+        isDragging = true;
+        dragStart = { x: point.x - panX, y: point.y - panY };
+    } else if (activeMapPointers.size === 2) {
+        isDragging = false;
+        hasDragged = true;
+        const [a, b] = activeMapPointers.values();
+        const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        pinchStart = {
+            distance: Math.hypot(a.x - b.x, a.y - b.y),
+            zoom: targetZoom,
+            panX: targetPanX,
+            panY: targetPanY,
+            worldX: (center.x - targetPanX) / targetZoom,
+            worldY: (center.y - targetPanY) / targetZoom
+        };
+    }
 });
 
 function mapTileFromPointer(event) {
@@ -798,11 +1026,27 @@ function mapTileFromPointer(event) {
     return mapX >= 0 && mapX < WIDTH && mapY >= 0 && mapY < HEIGHT ? { x: mapX, y: mapY } : null;
 }
 
-window.addEventListener('mousemove', (e) => {
-    if (isDragging) {
-        const rect = CANVAS.getBoundingClientRect();
-        const pointerX = e.clientX - rect.left;
-        const pointerY = e.clientY - rect.top;
+CANVAS.addEventListener('pointermove', e => {
+    if (!activeMapPointers.has(e.pointerId)) return;
+    e.preventDefault();
+    const rect = CANVAS.getBoundingClientRect();
+    const point = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    activeMapPointers.set(e.pointerId, point);
+    if (activeMapPointers.size >= 2 && pinchStart) {
+        const [a, b] = activeMapPointers.values();
+        const centerX = (a.x + b.x) / 2;
+        const centerY = (a.y + b.y) / 2;
+        const distance = Math.hypot(a.x - b.x, a.y - b.y);
+        targetZoom = Math.max(0.5, Math.min(8, pinchStart.zoom * distance / Math.max(1, pinchStart.distance)));
+        targetPanX = centerX - pinchStart.worldX * targetZoom;
+        targetPanY = centerY - pinchStart.worldY * targetZoom;
+        zoom = targetZoom;
+        panX = targetPanX;
+        panY = targetPanY;
+        requestMapRender();
+    } else if (isDragging) {
+        const pointerX = point.x;
+        const pointerY = point.y;
         let dx = pointerX - panX - dragStart.x;
         let dy = pointerY - panY - dragStart.y;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDragged = true;
@@ -815,13 +1059,22 @@ window.addEventListener('mousemove', (e) => {
     }
 });
 
-window.addEventListener('mouseup', (e) => {
-    if (isDragging && !hasDragged) {
+function finishMapPointer(e) {
+    const point = activeMapPointers.get(e.pointerId);
+    if (!point) return;
+    const wasSingleTap = activeMapPointers.size === 1 && !hasDragged &&
+        (!pointerDownPosition || Math.hypot(point.x - pointerDownPosition.x, point.y - pointerDownPosition.y) < 8);
+    if (wasSingleTap) {
         const tile = mapTileFromPointer(e);
         if (tile) actOnMapTile(tile.x, tile.y);
     }
+    activeMapPointers.delete(e.pointerId);
+    pinchStart = null;
+    pointerDownPosition = null;
     isDragging = false;
-});
+}
+CANVAS.addEventListener('pointerup', finishMapPointer);
+CANVAS.addEventListener('pointercancel', finishMapPointer);
 
 document.getElementById('play-as-nation').addEventListener('click', playAsSelectedNation);
 document.getElementById('build-city-button').addEventListener('click', () => togglePlacementMode('city'));
@@ -842,10 +1095,34 @@ document.getElementById('send-boat-button').addEventListener('click', () => {
         setPlayerActionMessage('');
     } else {
         placementMode = 'naval';
-        setPlayerActionMessage('Choose an unclaimed coast, or an enemy coast you are at war with, as the boat destination. Press Escape to cancel.');
+        setPlayerActionMessage('Choose an unclaimed coast or an enemy coast you are at war with. Defending carracks repel boats.');
     }
     updateNationPanel();
     render();
+});
+document.getElementById('send-carrack-button').addEventListener('click', () => {
+    const player = nations[playerNationId];
+    if (!player || playerOutcome) return;
+    if (placementMode === 'carrack') {
+        placementMode = null;
+        setPlayerActionMessage('');
+    } else {
+        placementMode = 'carrack';
+        setPlayerActionMessage('Choose an enemy coast to send your carrack after its fleet.');
+    }
+    updateNationPanel();
+    render();
+});
+document.getElementById('build-carrack-button').addEventListener('click', () => {
+    const player = nations[playerNationId];
+    if (!player || playerOutcome) return;
+    if (buildCarrack(player)) {
+        setPlayerActionMessage(`Carrack built for $${CARRACK_COST.toLocaleString()}. It costs $${CARRACK_MAINTENANCE.toLocaleString()} per year to maintain.`);
+        updateNationPanel();
+        updateLeaderboard();
+    } else {
+        setPlayerActionMessage(`A carrack costs $${CARRACK_COST.toLocaleString()} and requires coastal territory.`);
+    }
 });
 document.querySelectorAll('.recruit-button').forEach(button => {
     button.addEventListener('click', () => {
@@ -864,8 +1141,29 @@ document.querySelectorAll('.recruit-button').forEach(button => {
     });
 });
 document.getElementById('recruit-quantity').addEventListener('input', updateNationPanel);
+document.querySelectorAll('.auto-army-target').forEach(input => {
+    input.addEventListener('change', () => {
+        const player = nations[playerNationId];
+        if (!player || playerOutcome) return;
+        player.autoArmyTargets = player.autoArmyTargets || {};
+        const value = input.value === '' ? null : Number(input.value);
+        if (value === null) delete player.autoArmyTargets[input.dataset.troopTarget];
+        else if (Number.isSafeInteger(value) && value >= 0) player.autoArmyTargets[input.dataset.troopTarget] = value;
+        else input.value = player.autoArmyTargets[input.dataset.troopTarget] ?? '';
+        updateNationPanel();
+    });
+});
 document.getElementById('player-city-select').addEventListener('change', event => {
     selectedCityId = event.target.value || null;
+    updateNationPanel();
+});
+document.getElementById('auto-city-upgrader').addEventListener('change', event => {
+    const player = nations[playerNationId];
+    if (!player || playerOutcome) return;
+    player.autoCityUpgrader = event.target.checked;
+    setPlayerActionMessage(player.autoCityUpgrader
+        ? 'Auto city upgrades enabled. The lowest-level city will upgrade when affordable.'
+        : 'Auto city upgrades disabled.');
     updateNationPanel();
 });
 document.getElementById('upgrade-city-button').addEventListener('click', () => {
@@ -914,6 +1212,15 @@ document.getElementById('join-alliance-button').addEventListener('click', () => 
     updateNationPanel();
     updateLeaderboard();
     render();
+});
+document.getElementById('leave-alliance-button').addEventListener('click', () => {
+    const player = nations[playerNationId];
+    if (!player || playerOutcome) return;
+    if (leaveAlliance(player.id)) {
+        setPlayerActionMessage('You left your alliance. The alliance truce with former members has ended.');
+        updateNationPanel();
+        updateLeaderboard();
+    }
 });
 document.getElementById('send-donation-button').addEventListener('click', () => {
     const player = nations[playerNationId];
@@ -1006,10 +1313,12 @@ document.getElementById('map-view-toggle').addEventListener('click', () => {
 });
 
 function startNewGame() {
+    resetPlayerOutcomeScreen();
     const menu = document.getElementById('main-menu-overlay');
     menu.hidden = true;
     gameStarted = false;
     setSpeed(0);
+    lastRunningSpeed = 1;
     generatePresetMap(document.getElementById('mapPresetSelect').value);
     applyHudPanelSettings('nation-panel');
     document.getElementById('main-menu-title').textContent = 'Choose Your Nation';
@@ -1023,14 +1332,15 @@ function startNewGame() {
 }
 
 function openMainMenu() {
-    if (gameStarted && !playerOutcome) setSpeed(0);
+    if (gameStarted) setSpeed(0);
     const hasPlayer = playerNationId !== null;
     document.getElementById('main-menu-title').textContent = hasPlayer ? 'Game Menu' : 'Choose Your Nation';
     document.getElementById('main-menu-description').textContent = hasPlayer
         ? 'Resume your current simulation or start a new world.'
         : 'Select a nation on the map, then press Play as Nation to begin the simulation.';
     document.getElementById('menu-choose-nation').hidden = hasPlayer;
-    document.getElementById('menu-resume').hidden = !hasPlayer || Boolean(playerOutcome);
+    document.getElementById('menu-resume').hidden = !hasPlayer;
+    document.getElementById('menu-resume').textContent = playerOutcome ? 'Continue Watching' : 'Resume Game';
     document.getElementById('menu-new-game').hidden = !hasPlayer;
     document.getElementById('menu-close').hidden = !hasPlayer;
     document.getElementById('main-menu-overlay').hidden = false;
@@ -1042,7 +1352,7 @@ document.getElementById('menu-choose-nation').addEventListener('click', () => {
 });
 document.getElementById('menu-resume').addEventListener('click', () => {
     document.getElementById('main-menu-overlay').hidden = true;
-    if (gameStarted && !playerOutcome) setSpeed(2);
+    if (gameStarted) setSpeed(lastRunningSpeed);
 });
 document.getElementById('menu-new-game').addEventListener('click', startNewGame);
 document.getElementById('mapPresetSelect').addEventListener('change', event => {
@@ -1051,6 +1361,34 @@ document.getElementById('mapPresetSelect').addEventListener('change', event => {
 document.getElementById('menu-close').addEventListener('click', () => {
     document.getElementById('main-menu-overlay').hidden = true;
 });
+document.getElementById('menu-tutorial').addEventListener('click', () => openTutorial());
+document.getElementById('tutorial-close').addEventListener('click', closeTutorial);
+document.getElementById('tutorial-skip').addEventListener('click', closeTutorial);
+document.getElementById('tutorial-back').addEventListener('click', () => {
+    if (tutorialStepIndex === 0) return;
+    tutorialStepIndex--;
+    renderTutorialStep();
+});
+document.getElementById('tutorial-next').addEventListener('click', () => {
+    if (tutorialStepIndex === TUTORIAL_STEPS.length - 1) {
+        closeTutorial();
+        return;
+    }
+    tutorialStepIndex++;
+    renderTutorialStep();
+});
+document.getElementById('tutorial-overlay').addEventListener('click', event => {
+    if (event.target.id === 'tutorial-overlay') closeTutorial();
+});
+document.getElementById('outcome-continue').addEventListener('click', () => {
+    document.getElementById('outcome-overlay').hidden = true;
+    if (gameStarted) setSpeed(lastRunningSpeed);
+});
+document.getElementById('outcome-menu').addEventListener('click', () => {
+    document.getElementById('outcome-overlay').hidden = true;
+    openMainMenu();
+});
+document.getElementById('outcome-new-game').addEventListener('click', startNewGame);
 
 function openSettings() {
     document.getElementById('settings-overlay').hidden = false;
@@ -1104,6 +1442,10 @@ function runShortcut(action) {
 }
 
 window.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !document.getElementById('tutorial-overlay').hidden) {
+        closeTutorial();
+        return;
+    }
     if (event.key === 'Escape' && placementMode) {
         placementMode = null;
         setPlayerActionMessage('');

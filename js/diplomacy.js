@@ -350,6 +350,11 @@ function checkEnclaveAnnexation() {
 // --- WAR DECLARATIONS ---
 
 function registerWarPair(nationA, nationB, duration = 0) {
+    if (!nationA || !nationB || nationA.id === nationB.id) return false;
+    // Every path that starts or propagates a war must respect an active truce.
+    // Alliance warfare and legacy save synchronization call this directly.
+    if ((nationA.peaceTreaties?.[nationB.id] || 0) > 0 ||
+        (nationB.peaceTreaties?.[nationA.id] || 0) > 0) return false;
     if (isOpeningPeaceActive() &&
         nationA.wars?.[nationB.id] === undefined &&
         nationB.wars?.[nationA.id] === undefined) return;
@@ -365,6 +370,7 @@ function registerWarPair(nationA, nationB, duration = 0) {
     if (nationB.warStartTiles[nationA.id] === undefined) {
         nationB.warStartTiles[nationA.id] = nationB.tiles.length;
     }
+    return true;
 }
 
 function isOpeningPeaceActive() {
@@ -379,6 +385,14 @@ function synchronizeWarPairs() {
             const enemy = nations[enemyId];
             if (!enemy) {
                 delete nation.wars[enemyId];
+                return;
+            }
+            if ((nation.peaceTreaties?.[enemyId] || 0) > 0 ||
+                (enemy.peaceTreaties?.[nation.id] || 0) > 0) {
+                delete nation.wars[enemyId];
+                if (enemy.wars) delete enemy.wars[nation.id];
+                if (nation.warStartTiles) delete nation.warStartTiles[enemyId];
+                if (enemy.warStartTiles) delete enemy.warStartTiles[nation.id];
                 return;
             }
             if (!enemy.wars || enemy.wars[nation.id] === undefined) {
@@ -506,6 +520,35 @@ function joinExistingAlliance(playerId, memberId) {
     if (player.tiles.length > 0) {
         const center = player.tiles[Math.floor(player.tiles.length / 2)];
         addFloatingText(`🤝 ${alliance.name}`, center.x, center.y, alliance.color);
+    }
+    return true;
+}
+
+function leaveAlliance(nationId) {
+    const nation = nations[nationId];
+    const alliance = nation?.allianceId != null ? alliances[nation.allianceId] : null;
+    if (!nation || nation.id !== playerNationId || !alliance) return false;
+    const formerMembers = alliance.members.filter(id => id !== nation.id);
+    alliance.members = formerMembers;
+    nation.allianceId = null;
+    nation.allianceTimer = 0;
+    formerMembers.forEach(memberId => {
+        delete nation.peaceTreaties?.[memberId];
+        if (nations[memberId]?.peaceTreaties) delete nations[memberId].peaceTreaties[nation.id];
+    });
+    if (formerMembers.length < 2) {
+        formerMembers.forEach(memberId => {
+            const member = nations[memberId];
+            if (member) {
+                member.allianceId = null;
+                member.allianceTimer = 0;
+            }
+        });
+        delete alliances[alliance.id];
+        logNews(`🛡️ The <b>${alliance.name}</b> dissolved after ${nation.name} left.`);
+    } else {
+        if (alliance.leaderId === nation.id) alliance.leaderId = formerMembers[0];
+        logNews(`🛡️ <b>${nation.name}</b> left the <b>${alliance.name}</b>.`);
     }
     return true;
 }
@@ -743,7 +786,7 @@ function canAttackTile(attacker, targetX, targetY) {
     return true;
 }
 
-function findSeaExpedition(nationId, maxDist = 45) {
+function findSeaExpedition(nationId, maxDist = 120) {
     let nation = nations[nationId];
     if (!nation) return null;
 
@@ -779,7 +822,7 @@ function findSeaExpedition(nationId, maxDist = 45) {
     return null;
 }
 
-function findSeaExpeditionTo(nationId, targetX, targetY, maxDist = 45) {
+function findSeaExpeditionTo(nationId, targetX, targetY, maxDist = 120) {
     const nation = nations[nationId];
     if (!nation || !Number.isInteger(targetX) || !Number.isInteger(targetY) ||
         targetX < 0 || targetX >= WIDTH || targetY < 0 || targetY >= HEIGHT ||

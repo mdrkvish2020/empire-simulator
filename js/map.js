@@ -145,6 +145,7 @@ function selectClusterObjective(nation, frontlines) {
 
 // Map Presets Generator
 function generatePresetMap(presetName) {
+    if (typeof activeGameSaveId !== 'undefined') activeGameSaveId = null;
     peaceOffers = [];
     battleMarkers = [];
     gameStarted = false;
@@ -170,6 +171,7 @@ function generatePresetMap(presetName) {
     nations = {};
     alliances = {};
     ships = [];
+    carrackShips = [];
     nextNationId = 1;
     nextAllianceId = 1;
     nextCityId = 1;
@@ -350,6 +352,9 @@ function spawnRandomNation(spawnX = null, spawnY = null) {
         peaceTreaties: {},
         allianceId: null,
         ports: 0,
+        carracks: 0,
+        autoArmyTargets: {},
+        autoCityUpgrader: false,
         objectiveQueue: [],
         threatMarkers: {}
     };
@@ -359,6 +364,7 @@ function spawnRandomNation(spawnX = null, spawnY = null) {
 }
 
 function clearNations() {
+    if (typeof activeGameSaveId !== 'undefined') activeGameSaveId = null;
     peaceOffers = [];
     gameStarted = false;
     playerNationId = null;
@@ -378,6 +384,7 @@ function clearNations() {
     nations = {};
     alliances = {};
     ships = [];
+    carrackShips = [];
     logNews("All nations and cities were cleared.");
     updateEmpireOverview();
     render();
@@ -392,6 +399,8 @@ function removeNation(nationId) {
     );
 
     if (selectedNationId === nationId) selectedNationId = null;
+    ships = ships.filter(ship => ship.nationId !== nationId);
+    carrackShips = carrackShips.filter(ship => ship.nationId !== nationId && ship.enemyId !== nationId);
     if (nationId === playerNationId && !playerOutcome) {
         playerOutcome = 'defeat';
         playerNationName = n.name;

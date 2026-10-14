@@ -58,7 +58,39 @@ function getAffordableRecruitmentAmount(nation, type, requestedAmount) {
 }
 
 function getCityUpgradeCost(city) {
-    return city ? Math.floor(15 + city.level * 5) : Infinity;
+    if (!city || city.level >= 100) return Infinity;
+    const level = Math.max(1, city.level);
+    const cost = 40 * Math.pow(300000 / 40, (level - 1) / 98);
+    return Math.round(cost);
+}
+
+const CARRACK_COST = 100000;
+const CARRACK_MAINTENANCE = 500;
+
+function buildCarrack(nation) {
+    if (!nation || nation.gold < CARRACK_COST ||
+        !nation.tiles.some(tile => window.isCoastal(tile.x, tile.y))) return false;
+    nation.gold -= CARRACK_COST;
+    nation.carracks = (nation.carracks || 0) + 1;
+    updateNationEconomy(nation, calculateNationTileIncome(nation));
+    return true;
+}
+
+function updateAutoArmyManager(nation) {
+    if (!nation || nation.id !== playerNationId) return;
+    const targets = nation.autoArmyTargets || {};
+    const reserve = Math.max(1000, Math.max(0, -nation.netIncome) * 3);
+    for (const type of ['attack', 'defend', 'balanced']) {
+        const target = Number(targets[type]);
+        const current = nation.army[type] || 0;
+        if (!Number.isSafeInteger(target) || target <= current) continue;
+        const amount = target - current;
+        const affordable = getAffordableRecruitmentAmount(nation, type, amount);
+        if (affordable <= 0) continue;
+        const cost = getRecruitmentCost(type, affordable);
+        if (nation.gold - cost < reserve) continue;
+        recruitTroops(nation, type, affordable);
+    }
 }
 
 function upgradeCity(nation, city, refreshMultipliers = false) {
@@ -82,7 +114,7 @@ function updateNationEconomy(nation, totalIncome) {
         (nation.army.defend * perimeterDefBonus) + (nation.army.balanced * 0.01);
 
     nation.grossIncome = Math.floor((totalIncome * 0.25) + cityDirectIncome);
-    nation.maintenance = Math.floor(cityMaintenance + troopMaintenance);
+    nation.maintenance = Math.floor(cityMaintenance + troopMaintenance + (nation.carracks || 0) * CARRACK_MAINTENANCE);
     nation.netIncome = nation.grossIncome - nation.maintenance;
 }
 
@@ -292,6 +324,10 @@ const NAVAL_LAUNCH_COOLDOWN_TICKS = 25;
 function launchNavalExpedition(nationId, targetX = null, targetY = null) {
     const nation = nations[nationId];
     if (!nation || !nation.tiles || !nation.tiles.some(tile => window.isCoastal(tile.x, tile.y))) return false;
+    if (targetX !== null && targetY !== null) {
+        const targetOwner = territory[targetY]?.[targetX];
+        if (targetOwner !== null && targetOwner !== undefined && nations[targetOwner]?.carracks > 0) return false;
+    }
     if (nation.army.attack + nation.army.balanced < 8) return false;
     if (ships.filter(ship => ship.nationId === nation.id).length >= MAX_SHIPS_PER_NATION) return false;
     if (nation.lastNavalLaunch && year - nation.lastNavalLaunch < NAVAL_LAUNCH_COOLDOWN_TICKS) return false;
@@ -300,6 +336,9 @@ function launchNavalExpedition(nationId, targetX = null, targetY = null) {
         ? findSeaExpedition(nation.id)
         : findSeaExpeditionTo(nation.id, targetX, targetY);
     if (!expedition) return false;
+    const expeditionOwner = territory[expedition.target.y]?.[expedition.target.x];
+    if (expeditionOwner !== null && expeditionOwner !== undefined &&
+        expeditionOwner !== nation.id && (nations[expeditionOwner]?.carracks || 0) > 0) return false;
 
     if (nation.army.attack >= 8) nation.army.attack -= 8;
     else nation.army.balanced -= 8;
@@ -313,6 +352,34 @@ function launchNavalExpedition(nationId, targetX = null, targetY = null) {
         enemyId: expedition.enemyId || null
     });
     return expedition;
+}
+
+function launchCarrackAttack(nationId, targetX, targetY) {
+    const nation = nations[nationId];
+    const assignedCarrack = carrackShips.find(ship => ship.nationId === nationId && ship.patrol);
+    const hasUnassignedCarrack = (nation?.carracks || 0) > carrackShips.filter(ship => ship.nationId === nationId).length;
+    const targetId = territory[targetY]?.[targetX];
+    const targetNation = targetId === null || targetId === undefined ? null : nations[targetId];
+    if (!nation || !targetNation || targetNation.id === nation.id ||
+        nation.wars?.[targetNation.id] === undefined ||
+        (nation.allianceId != null && nation.allianceId === targetNation.allianceId) ||
+        (nation.peaceTreaties?.[targetNation.id] || 0) > 0 ||
+        !(targetNation.carracks > 0 || ships.some(ship => ship.nationId === targetNation.id)) ||
+        (!hasUnassignedCarrack && !assignedCarrack) ||
+        (carrackShips.filter(ship => ship.nationId === nation.id).length >= MAX_SHIPS_PER_NATION && !assignedCarrack)) return false;
+    const route = findSeaExpeditionTo(nation.id, targetX, targetY);
+    if (!route) return false;
+    if (assignedCarrack && !hasUnassignedCarrack) {
+        assignedCarrack.path = route.path;
+        assignedCarrack.progress = 0;
+        assignedCarrack.target = route.target;
+        assignedCarrack.enemyId = targetNation.id;
+        assignedCarrack.patrol = false;
+        assignedCarrack.lastAttackYear = year;
+        return route;
+    }
+    carrackShips.push({ nationId: nation.id, path: route.path, progress: 0, target: route.target, enemyId: targetNation.id });
+    return route;
 }
 
 // 3. Main Tick Function
@@ -432,6 +499,9 @@ function tick() {
         n.population = totalPop;
         n.tiles.push(...newTiles);
         n.ports = coastalCount;
+        if (n.id !== playerNationId && coastalCount > 0 && (n.carracks || 0) === 0 && n.gold >= CARRACK_COST * 1.5 && Math.random() < 0.015) {
+            buildCarrack(n);
+        }
 
         // Financial Maintenance
         const threatenedSectorsCount = Object.keys(n.threatMarkers || {}).length;
@@ -443,6 +513,8 @@ function tick() {
             if (n.army.attack > 5) n.army.attack = Math.floor(n.army.attack * 0.90);
             if (n.army.defend > 5) n.army.defend = Math.floor(n.army.defend * 0.90);
         }
+
+        updateAutoArmyManager(n);
 
         // Army Recruitment & Subsidizing Allies
         let isAtWar = Object.keys(n.wars).length > 0;
@@ -502,6 +574,10 @@ function tick() {
                 let targetCity = upgradeable[0];
                 upgradeCity(n, targetCity);
             }
+        } else if (n.id === playerNationId && n.autoCityUpgrader) {
+            const targetCity = myCities.filter(city => city.level < 100)
+                .sort((a, b) => a.level - b.level || a.id - b.id)[0];
+            if (targetCity && n.gold >= getCityUpgradeCost(targetCity)) upgradeCity(n, targetCity);
         }
     });
 
@@ -541,11 +617,22 @@ function tick() {
     // 4. NAVAL EXPEDITIONS
     nationKeys.forEach(id => {
         let n = nations[id];
-        if (!n || n.id === playerNationId || n.ports === 0 ||
+        if (!n || n.ports === 0 ||
             n.army.attack + n.army.balanced < 8 ||
             ships.filter(ship => ship.nationId === n.id).length >= MAX_SHIPS_PER_NATION ||
             (n.lastNavalLaunch && year - n.lastNavalLaunch < NAVAL_LAUNCH_COOLDOWN_TICKS)) return;
         if (Math.random() < 0.10) launchNavalExpedition(n.id);
+    });
+
+    nationKeys.forEach(id => {
+        const nation = nations[id];
+        if (!nation || !(nation.carracks > carrackShips.filter(ship => ship.nationId === nation.id).length) || Math.random() >= 0.04) return;
+        const targets = Object.values(nations).filter(target => target && target.id !== nation.id &&
+            nation.wars?.[target.id] !== undefined && (target.carracks > 0 || ships.some(ship => ship.nationId === target.id)));
+        for (const target of targets) {
+            const coast = target.tiles.find(tile => window.isCoastal(tile.x, tile.y));
+            if (coast && launchCarrackAttack(nation.id, coast.x, coast.y)) break;
+        }
     });
 
     let activeShips = [];
@@ -556,6 +643,12 @@ function tick() {
 
         if (ship.progress >= ship.path.length - 1) {
             let tx = ship.target.x, ty = ship.target.y;
+            const targetNationId = territory[ty][tx];
+            const targetNation = targetNationId !== null ? nations[targetNationId] : null;
+            if (targetNation && targetNation.id !== owner.id && (targetNation.carracks || 0) > 0) {
+                logNews(`⚓ <b>${owner.name}</b>'s boat was sunk by <b>${targetNation.name}</b>'s carrack. Clear the coast with a carrack attack before landing.`);
+                return;
+            }
             if (ship.type === 'colonize' && territory[ty][tx] === null && grid[ty][tx] === 1) {
                 territory[ty][tx] = owner.id;
                 owner.tiles.push({x: tx, y: ty});
@@ -579,7 +672,78 @@ function tick() {
             activeShips.push(ship);
         }
     });
+    const getSeaPosition = ship => {
+        const index = Math.min(Math.floor(ship.progress), ship.path.length - 1);
+        const next = ship.path[Math.min(index + 1, ship.path.length - 1)];
+        const current = ship.path[index];
+        const progress = ship.progress - index;
+        return {
+            x: current.x + (next.x - current.x) * progress,
+            y: current.y + (next.y - current.y) * progress
+        };
+    };
     ships = activeShips;
+
+    const activeCarrackShips = [];
+    const sunkBoats = new Set();
+    carrackShips.forEach(carrack => {
+        if (!carrack.patrol) carrack.progress += 0.5;
+        const owner = nations[carrack.nationId];
+        if (!owner) return;
+        if (carrack.progress >= carrack.path.length - 1) {
+            if (!carrack.patrol) {
+                const defender = nations[carrack.enemyId];
+                if (defender && (defender.carracks || 0) > 0) {
+                    defender.carracks--;
+                    logNews(defender.carracks > 0
+                        ? `⚓ <b>${owner.name}</b>'s carrack destroyed an enemy carrack off <b>${defender.name}</b>'s coast. ${defender.carracks} carrack${defender.carracks === 1 ? '' : 's'} remain.`
+                        : `⚓ <b>${owner.name}</b>'s carrack cleared the last enemy carrack off <b>${defender.name}</b>'s coast. Boats can now attempt a landing.`);
+                } else {
+                    logNews(`⚓ <b>${owner.name}</b>'s carrack reached the coast, but found no enemy carracks to attack.`);
+                }
+                carrack.patrol = true;
+            }
+        }
+        activeCarrackShips.push(carrack);
+    });
+
+    const sunkCarracks = new Set();
+    activeCarrackShips.forEach(carrack => {
+        if (sunkCarracks.has(carrack)) return;
+        const owner = nations[carrack.nationId];
+        const position = getSeaPosition(carrack);
+        const nearbyBoats = ships.filter(boat => {
+            if (boat.nationId === carrack.nationId || sunkBoats.has(boat)) return false;
+            const target = nations[boat.nationId];
+            if (!target || owner.wars?.[target.id] === undefined) return false;
+            const boatPosition = getSeaPosition(boat);
+            return Math.hypot(position.x - boatPosition.x, position.y - boatPosition.y) <= 12;
+        });
+        const targetBoat = nearbyBoats[0];
+        if (targetBoat && year - (carrack.lastAttackYear || -Infinity) >= 3) {
+            sunkBoats.add(targetBoat);
+            carrack.lastAttackYear = year;
+            logNews(`⚓ <b>${owner.name}</b>'s carrack fired on and sank a boat belonging to <b>${nations[targetBoat.nationId]?.name || 'the enemy'}</b>.`);
+            return;
+        }
+        const nearbyCarracks = activeCarrackShips.filter(other => {
+            if (other === carrack || other.nationId === carrack.nationId || sunkCarracks.has(other)) return false;
+            const enemy = nations[other.nationId];
+            if (!enemy || owner.wars?.[enemy.id] === undefined) return false;
+            const otherPosition = getSeaPosition(other);
+            return Math.hypot(position.x - otherPosition.x, position.y - otherPosition.y) <= 12;
+        });
+        const targetCarrack = nearbyCarracks[0];
+        if (targetCarrack && year - (carrack.lastAttackYear || -Infinity) >= 3) {
+            sunkCarracks.add(targetCarrack);
+            carrack.lastAttackYear = year;
+            const lostNation = nations[targetCarrack.nationId];
+            if (lostNation) lostNation.carracks = Math.max(0, (lostNation.carracks || 0) - 1);
+            logNews(`⚓ <b>${owner.name}</b>'s warship sank a carrack from <b>${lostNation?.name || 'the enemy'}</b>.`);
+        }
+    });
+    ships = ships.filter(ship => !sunkBoats.has(ship));
+    carrackShips = activeCarrackShips.filter(ship => !sunkCarracks.has(ship));
 
     // 5. COMBAT RESOLUTION
     nationKeys.forEach(id => {
@@ -855,6 +1019,19 @@ function getNeighboringNations(nationId) {
 function checkDominationVictory(totalLandTiles) {
     if (!totalLandTiles || totalLandTiles === 0) return;
 
+    const player = nations[playerNationId];
+    const playerAlliance = player?.allianceId != null ? alliances[player.allianceId] : null;
+    if (player && playerAlliance && !playerOutcome) {
+        const allianceLand = [...new Set(playerAlliance.members)]
+            .map(id => nations[id])
+            .filter(Boolean)
+            .reduce((sum, member) => sum + member.tiles.length, 0);
+        if (allianceLand / totalLandTiles >= 0.9) {
+            playerOutcome = 'alliance-victory';
+            logNews(`🏆 <b>${playerAlliance.name}</b> controls at least 90% of the land. You achieved an <b>Alliance Victory</b>!`);
+        }
+    }
+
     Object.values(nations).forEach(n => {
         if (!n || !n.tiles) return;
         let controlRatio = n.tiles.length / totalLandTiles;
@@ -872,6 +1049,17 @@ function checkDominationVictory(totalLandTiles) {
             if (typeof logNews === "function") {
                 logNews(`🏆 <b>${n.name}</b> has reached 75% land control and achieved <b>Domination Victory</b>!`);
             }
+        }
+    });
+
+    Object.values(alliances).forEach(alliance => {
+        const allianceLand = [...new Set(alliance.members || [])]
+            .map(id => nations[id])
+            .filter(Boolean)
+            .reduce((sum, member) => sum + member.tiles.length, 0);
+        if (allianceLand / totalLandTiles >= 0.9 && !window.gameWon) {
+            window.gameWon = true;
+            logNews(`🏆 <b>${alliance.name}</b> has reached 90% land control and achieved <b>Alliance Victory</b>!`);
         }
     });
 }

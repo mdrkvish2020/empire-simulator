@@ -1,5 +1,6 @@
 const GAME_SAVES_INDEX_KEY = 'agesOfConflictGameSaves';
 const GAME_SAVE_KEY_PREFIX = 'agesOfConflictGameSave:';
+let activeGameSaveId = null;
 
 function getGameSaveIndex() {
     const savedIndex = localStorage.getItem(GAME_SAVES_INDEX_KEY);
@@ -74,6 +75,7 @@ function createGameSaveState() {
         nations,
         alliances,
         ships,
+        carrackShips,
         battleMarkers,
         peaceOffers,
         nextNationId,
@@ -149,7 +151,7 @@ function renderSavedGames() {
             info.className = 'saved-game-info';
             const name = document.createElement('div');
             name.className = 'saved-game-name';
-            name.textContent = save.name;
+            name.textContent = save.id === activeGameSaveId ? `${save.name} · Current` : save.name;
             const date = document.createElement('div');
             date.className = 'saved-game-date';
             date.textContent = `Year ${save.year} · ${new Date(save.savedAt).toLocaleString()}`;
@@ -182,26 +184,30 @@ async function saveCurrentGame() {
         return;
     }
     const nameInput = document.getElementById('save-game-name');
-    const name = nameInput.value.trim() || `${playerNationName || 'Empire'} · Year ${year}`;
     const saveButton = document.getElementById('save-game-button');
     saveButton.disabled = true;
     try {
         const saves = getGameSaveIndex();
-        const id = typeof crypto.randomUUID === 'function'
+        const activeRecord = saves.find(save => save.id === activeGameSaveId) || null;
+        const id = activeRecord?.id || (typeof crypto.randomUUID === 'function'
             ? crypto.randomUUID()
-            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+        const name = nameInput.value.trim() || activeRecord?.name || `${playerNationName || 'Empire'} · Year ${year}`;
         const savedAt = new Date().toISOString();
         const payload = await encodeGameSave(createGameSaveState());
+        const oldPayload = activeRecord ? localStorage.getItem(`${GAME_SAVE_KEY_PREFIX}${id}`) : null;
         localStorage.setItem(`${GAME_SAVE_KEY_PREFIX}${id}`, payload);
         try {
-            localStorage.setItem(GAME_SAVES_INDEX_KEY, JSON.stringify([
-                ...saves,
-                { id, name, savedAt, year }
-            ]));
+            const updatedSaves = activeRecord
+                ? saves.map(save => save.id === id ? { ...save, name, savedAt, year } : save)
+                : [...saves, { id, name, savedAt, year }];
+            localStorage.setItem(GAME_SAVES_INDEX_KEY, JSON.stringify(updatedSaves));
         } catch (error) {
-            localStorage.removeItem(`${GAME_SAVE_KEY_PREFIX}${id}`);
+            if (oldPayload !== null) localStorage.setItem(`${GAME_SAVE_KEY_PREFIX}${id}`, oldPayload);
+            else localStorage.removeItem(`${GAME_SAVE_KEY_PREFIX}${id}`);
             throw error;
         }
+        activeGameSaveId = id;
         nameInput.value = '';
         showSavedGamesStatus(`Saved “${name}” at year ${year}.`);
         renderSavedGames();
@@ -231,8 +237,16 @@ async function loadGameSave(id) {
         territory = state.territory;
         cities = state.cities;
         nations = state.nations;
+        Object.values(nations).forEach(nation => {
+            nation.carracks = Number.isSafeInteger(nation.carracks) && nation.carracks >= 0 ? nation.carracks : 0;
+            nation.autoArmyTargets = nation.autoArmyTargets && typeof nation.autoArmyTargets === 'object'
+                ? nation.autoArmyTargets
+                : {};
+            nation.autoCityUpgrader = Boolean(nation.autoCityUpgrader);
+        });
         alliances = state.alliances;
         ships = state.ships;
+        carrackShips = Array.isArray(state.carrackShips) ? state.carrackShips : [];
         battleMarkers = [];
         peaceOffers = state.peaceOffers;
         nextNationId = state.nextNationId;
@@ -250,6 +264,7 @@ async function loadGameSave(id) {
         mapMode = state.mapMode;
         lbSortCategory = state.lbSortCategory;
         lastRunningSpeed = state.lastRunningSpeed;
+        activeGameSaveId = id;
         window.gameWon = state.gameWon;
         selectedNationId = playerNationId;
         selectedCityId = null;
@@ -264,9 +279,13 @@ async function loadGameSave(id) {
         document.getElementById('main-menu-overlay').hidden = true;
         document.getElementById('leaderboard-modal').style.display = 'none';
         applyHudPanelSettings('nation-panel');
+        resetPlayerOutcomeScreen();
         updateNationPanel();
         setMapMode(mapMode);
         setLeaderboardSort(lbSortCategory);
+        // Refresh button state after gameStarted has been restored from the save.
+        setSpeed(0);
+        renderSavedGames();
     } catch (error) {
         console.error('Could not load saved game.', error);
         showSavedGamesStatus(`Could not load game: ${error.message}`, true);
@@ -278,6 +297,7 @@ function deleteGameSave(id) {
         const saves = getGameSaveIndex();
         localStorage.removeItem(`${GAME_SAVE_KEY_PREFIX}${id}`);
         localStorage.setItem(GAME_SAVES_INDEX_KEY, JSON.stringify(saves.filter(save => save.id !== id)));
+        if (activeGameSaveId === id) activeGameSaveId = null;
         renderSavedGames();
     } catch (error) {
         console.error('Could not delete saved game.', error);
