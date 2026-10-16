@@ -1,0 +1,12 @@
+{
+  "name": "empire-simulation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Empire Simulation with friend lobbies",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
