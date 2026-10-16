@@ -599,7 +599,7 @@ function updateDiplomacyAndFriction() {
         if (!n.opinions) n.opinions = {};
         if (!n.peaceTreaties) n.peaceTreaties = {};
 
-        if (n.id !== playerNationId) processMultiWarPeaceOffers(n);
+        if (!isHumanNation(n.id)) processMultiWarPeaceOffers(n);
 
         nationKeys.forEach(otherId => {
             if (otherId !== n.id && n.opinions[otherId] === undefined) {
@@ -670,10 +670,10 @@ function updateAlliancesAndCoalitions(totalLandTiles) {
 
         if (n.allianceTimer === undefined) n.allianceTimer = 0;
 
-        if (n.id !== playerNationId && n.allianceId === null && Math.random() < 0.05) {
+        if (!isHumanNation(n.id) && n.allianceId === null && Math.random() < 0.05) {
             let potentialPartners = Object.values(nations).filter(other => 
                 other.id !== n.id && 
-                other.id !== playerNationId &&
+                !isHumanNation(other.id) &&
                 n.wars[other.id] === undefined && 
                 other.allianceId === null &&
                 (n.opinions[other.id] || 50) >= 45 &&

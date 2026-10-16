@@ -849,6 +849,37 @@ select.map-select {
 .saved-games {
     margin-top: 20px;
 }
+.friend-lobby-controls {
+    margin-top: 14px;
+    padding: 12px;
+    border: 1px solid rgba(198, 166, 104, 0.28);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.025);
+}
+.friend-lobby-actions {
+    display: flex;
+    align-items: end;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 9px;
+}
+.lobby-code-entry { display: grid; gap: 4px; color: var(--text-muted); font-size: .72rem; }
+.lobby-code-entry input {
+    width: 120px;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: #1d1c16;
+    color: var(--text-main);
+    text-transform: uppercase;
+    letter-spacing: .12em;
+}
+.lobby-room { margin-top: 10px; }
+.lobby-invite { display: flex; align-items: center; gap: 9px; color: var(--text-muted); }
+.lobby-invite strong { color: #f2d89e; font-size: 1.2rem; letter-spacing: .15em; }
+.lobby-roster { display: grid; gap: 5px; margin: 9px 0; }
+.lobby-player { display: flex; justify-content: space-between; padding: 7px 9px; border-radius: 5px; background: rgba(0, 0, 0, .2); }
+.lobby-player small { color: var(--text-muted); }
 
 .saved-games-status {
     margin: 8px 0;

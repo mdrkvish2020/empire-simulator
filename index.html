@@ -297,6 +297,20 @@
             <p class="saved-games-status" id="saved-games-status" aria-live="polite"></p>
             <div id="saved-games-list" class="saved-games-list"></div>
         </div>
+        <section class="friend-lobby-controls" aria-labelledby="friend-lobby-title">
+            <div class="section-title" id="friend-lobby-title">Play with Friends</div>
+            <div class="friend-lobby-actions">
+                <button class="btn btn-success" id="create-lobby-button" type="button">Create Lobby</button>
+                <label class="lobby-code-entry">Lobby code<input id="join-lobby-code" type="text" maxlength="6" autocomplete="off" placeholder="ABC123" aria-label="Lobby code"></label>
+                <button class="btn" id="join-lobby-button" type="button">Join Lobby</button>
+            </div>
+            <p class="saved-games-status" id="lobby-status" aria-live="polite">Create a lobby to invite friends with a code.</p>
+            <div class="lobby-room" id="lobby-room" hidden>
+                <div class="lobby-invite">Share code <strong id="lobby-code-display"></strong><button class="btn" id="copy-lobby-code" type="button">Copy</button></div>
+                <div class="lobby-roster" id="lobby-roster" aria-live="polite"></div>
+                <button class="btn" id="leave-lobby-button" type="button">Leave Lobby</button>
+            </div>
+        </section>
         <div class="main-menu-actions">
             <button class="btn" id="settings-menu-button">⚙ Settings</button>
             <button class="btn" id="menu-tutorial">Tutorial</button>
@@ -358,6 +372,8 @@
 <script src="js/simulation.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/save-load.js"></script>
+<script src="js/multiplayer-config.js"></script>
+<script src="js/multiplayer.js"></script>
 <script src="js/device.js"></script>
 
 </body>

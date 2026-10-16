@@ -701,9 +701,15 @@ document.getElementById('nation-panel-toggle').addEventListener('click', () => {
 
 function playAsSelectedNation() {
     if (playerNationId !== null || playerOutcome || !nations[selectedNationId]) return;
+    if (window.multiplayer?.connected && !window.multiplayer.isNationAvailable(selectedNationId)) {
+        setPlayerActionMessage('A friend has already chosen this nation. Please select another.');
+        return;
+    }
     playerNationId = selectedNationId;
+    window.multiplayer?.setNation(playerNationId);
     playerNationName = nations[playerNationId].name;
     playerExpansionEnabled = false;
+    nations[playerNationId].playerExpansionEnabled = false;
     gameStarted = true;
     openingPeaceEndsAt = Date.now() + 30000;
     placementMode = null;
@@ -1111,6 +1117,7 @@ document.getElementById('build-city-button').addEventListener('click', () => tog
 document.getElementById('expand-territory-button').addEventListener('click', () => {
     if (playerNationId === null || playerOutcome) return;
     playerExpansionEnabled = !playerExpansionEnabled;
+    if (nations[playerNationId]) nations[playerNationId].playerExpansionEnabled = playerExpansionEnabled;
     setPlayerActionMessage(playerExpansionEnabled
         ? 'Expansion enabled. Your nation will claim territory automatically each year.'
         : 'Expansion paused. Your nation will stop claiming new territory.');
@@ -1499,6 +1506,10 @@ window.addEventListener('keydown', event => {
 
 // Speed Controls
 function setSpeed(speed) {
+    if (window.multiplayer?.connected && !window.multiplayer.isHost && !window.multiplayerApplying) {
+        window.multiplayer.requestSpeed(speed);
+        return;
+    }
     if (speed > 0 && !gameStarted) speed = 0;
     if (speed > 0) lastRunningSpeed = speed;
     simSpeed = speed;

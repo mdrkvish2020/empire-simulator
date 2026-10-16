@@ -450,7 +450,8 @@ function tick() {
         });
 
         // Land Expansion
-        if ((n.id !== playerNationId || playerExpansionEnabled) && frontier.length > 0) {
+        const expansionEnabled = n.id === playerNationId ? playerExpansionEnabled : Boolean(n.playerExpansionEnabled);
+        if ((!isHumanNation(n.id) || expansionEnabled) && frontier.length > 0) {
             let expansionBudget = Math.min(8, Math.floor(2 + n.tiles.length * 0.02));
 
             for (let i = 0; i < expansionBudget && frontier.length > 0; i++) {
@@ -499,7 +500,7 @@ function tick() {
         n.population = totalPop;
         n.tiles.push(...newTiles);
         n.ports = coastalCount;
-        if (n.id !== playerNationId && coastalCount > 0 && (n.carracks || 0) === 0 && n.gold >= CARRACK_COST * 1.5 && Math.random() < 0.015) {
+        if (!isHumanNation(n.id) && coastalCount > 0 && (n.carracks || 0) === 0 && n.gold >= CARRACK_COST * 1.5 && Math.random() < 0.015) {
             buildCarrack(n);
         }
 
@@ -524,7 +525,7 @@ function tick() {
         if (aiBias === 'defensive') recruitRatio += 0.15;
         if (aiBias === 'aggressive' || aiBias === 'expansionist') recruitRatio += 0.12;
 
-        if (n.id !== playerNationId && n.gold > 15) {
+        if (!isHumanNation(n.id) && n.gold > 15) {
             // Donate excess wealth to fighting allies who cannot border the target
             if (!isAtWar && n.allianceId) {
                 let fightingAlly = Object.values(nations).find(ally => ally.allianceId === n.allianceId && Object.keys(ally.wars).length > 0);
@@ -557,7 +558,7 @@ function tick() {
         let myCities = cities.filter(c => c.nationId === n.id);
         let newCityCost = getNewCityCost(n);
 
-        if (n.id !== playerNationId && !isAtWar && n.tiles.length >= (myCities.length + 1) * 200 && Math.random() < 0.03) {
+        if (!isHumanNation(n.id) && !isAtWar && n.tiles.length >= (myCities.length + 1) * 200 && Math.random() < 0.03) {
             if (n.gold >= newCityCost) {
                 let candidates = n.tiles.filter(t => canBuildCityAt(n, t.x, t.y));
 
@@ -567,14 +568,14 @@ function tick() {
                     buildCity(n.id, spot.x, spot.y);
                 }
             }
-        } else if (n.id !== playerNationId && !isAtWar && myCities.length > 0) {
+        } else if (!isHumanNation(n.id) && !isAtWar && myCities.length > 0) {
             let upgradeable = myCities.filter(c => c.level < 100);
             if (upgradeable.length > 0) {
                 upgradeable.sort((a, b) => a.level - b.level);
                 let targetCity = upgradeable[0];
                 upgradeCity(n, targetCity);
             }
-        } else if (n.id === playerNationId && n.autoCityUpgrader) {
+        } else if (isHumanNation(n.id) && n.autoCityUpgrader) {
             const targetCity = myCities.filter(city => city.level < 100)
                 .sort((a, b) => a.level - b.level || a.id - b.id)[0];
             if (targetCity && n.gold >= getCityUpgradeCost(targetCity)) upgradeCity(n, targetCity);
@@ -875,14 +876,14 @@ function processCoordinatedAllianceWarfare() {
     };
 
     Object.values(nations).forEach(n => {
-        if (!n || n.id === playerNationId) return;
+        if (!n || isHumanNation(n.id)) return;
         let groupKey = n.allianceId ? `alliance_${n.allianceId}` : `solo_${n.id}`;
         if (!allianceGroups[groupKey]) allianceGroups[groupKey] = [];
         allianceGroups[groupKey].push(n);
     });
 
     Object.values(allianceGroups).forEach(members => {
-        if (members.some(member => member.id === playerNationId)) return;
+        if (members.some(member => isHumanNation(member.id))) return;
         let activelyAtWar = members.some(m => Object.keys(m.wars).length > 0);
 
         // Alliance Rule: Focus on exactly 1 country at a time, wait until war ends
@@ -954,7 +955,7 @@ function processAllianceAndUnionDiplomacy() {
             let relation2 = n2.opinions[n1.id] || 50;
 
             // Alliance Invites: Relations > 80% to avoid fighting
-            if (n1.id !== playerNationId && n2.id !== playerNationId &&
+            if (!isHumanNation(n1.id) && !isHumanNation(n2.id) &&
                 relation1 > 80 && relation2 > 80 && !n1.allianceId && !n2.allianceId) {
                 let newAllianceId = `alliance_${Date.now()}_${Math.floor(Math.random()*1000)}`;
                 n1.allianceId = newAllianceId;
@@ -964,7 +965,7 @@ function processAllianceAndUnionDiplomacy() {
 
             // Union Formation: 100% Relations + Long-time Allies + Never at war
             let hasBeenAtWar = (n1.warHistory && n1.warHistory[n2.id]) || (n2.warHistory && n2.warHistory[n1.id]);
-            if (n1.id !== playerNationId && n2.id !== playerNationId &&
+            if (!isHumanNation(n1.id) && !isHumanNation(n2.id) &&
                 relation1 >= 100 && relation2 >= 100 && n1.allianceId && n1.allianceId === n2.allianceId && !hasBeenAtWar) {
                 if (Math.random() < 0.01) { 
                     mergeNationsIntoUnion(n1, n2);

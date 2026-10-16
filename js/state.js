@@ -31,6 +31,10 @@ let playerOutcome = null;
 let playerExpansionEnabled = false;
 let peaceOffers = [];
 
+function isHumanNation(nationId) {
+    return Number(nationId) === Number(playerNationId) || Boolean(window.multiplayer?.isHumanNation(nationId));
+}
+
 let lastLeaderboardUpdate = 0;
 
 let currentMinIncome = 0.5;

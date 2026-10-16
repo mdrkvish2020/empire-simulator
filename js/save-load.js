@@ -97,6 +97,70 @@ function createGameSaveState() {
     };
 }
 
+function applyMultiplayerGameState(state, speed = 0) {
+    const localPlayer = { playerNationId, playerNationName, playerOutcome, playerExpansionEnabled, selectedNationId, selectedCityId, placementMode };
+    const previousStarted = gameStarted;
+    grid = state.grid;
+    terrainType = state.terrainType;
+    popGrid = state.popGrid;
+    territory = state.territory;
+    cities = state.cities;
+    nations = state.nations;
+    alliances = state.alliances;
+    ships = state.ships || [];
+    carrackShips = state.carrackShips || [];
+    battleMarkers = state.battleMarkers || [];
+    peaceOffers = state.peaceOffers || [];
+    nextNationId = state.nextNationId;
+    nextAllianceId = state.nextAllianceId;
+    nextCityId = state.nextCityId;
+    year = state.year;
+    gameStarted = state.gameStarted;
+    openingPeaceEndsAt = state.openingPeaceEndsAt ?? null;
+    currentMinIncome = state.currentMinIncome;
+    currentMaxIncome = state.currentMaxIncome;
+    mapMode = state.mapMode || mapMode;
+    lbSortCategory = state.lbSortCategory || lbSortCategory;
+    lastRunningSpeed = state.lastRunningSpeed || lastRunningSpeed;
+    if (Array.isArray(state.tileMultiplier)) tileMultiplier = state.tileMultiplier;
+    playerNationId = localPlayer.playerNationId;
+    playerNationName = localPlayer.playerNationName;
+    playerOutcome = localPlayer.playerOutcome;
+    playerExpansionEnabled = localPlayer.playerExpansionEnabled;
+    cityGrid = Array(HEIGHT).fill().map(() => Array(WIDTH).fill(null));
+    cities.forEach(city => { cityGrid[city.y][city.x] = city; });
+    selectedNationId = nations[localPlayer.selectedNationId] ? localPlayer.selectedNationId : null;
+    selectedCityId = cities.some(city => city.id === localPlayer.selectedCityId) ? localPlayer.selectedCityId : null;
+    placementMode = localPlayer.placementMode;
+    recalculateCityMultipliers();
+    if (typeof window.multiplayerApplying !== 'undefined') window.multiplayerApplying = true;
+    const nextSpeed = window.multiplayer?.isHost
+        ? (previousStarted ? speed : (state.lastRunningSpeed || speed))
+        : 0;
+    setSpeed(nextSpeed);
+    if (window.multiplayer?.connected && !window.multiplayer.isHost) {
+        simSpeed = speed;
+        ['btn-pause', 'btn-play', 'btn-1x', 'btn-2x', 'btn-5x'].forEach(id => document.getElementById(id).classList.remove('active'));
+        document.getElementById('btn-play').classList.toggle('active', speed > 0);
+        document.getElementById('btn-pause').classList.toggle('active', speed === 0);
+        document.getElementById('btn-play').disabled = !gameStarted || speed > 0;
+        document.getElementById('btn-pause').disabled = speed === 0;
+        const speedButton = document.getElementById(speed === 0 ? 'btn-pause' : `btn-${speed}x`);
+        if (speedButton) speedButton.classList.add('active');
+    }
+    if (typeof window.multiplayerApplying !== 'undefined') window.multiplayerApplying = false;
+    if (gameStarted) document.getElementById('main-menu-overlay').hidden = true;
+    if (!previousStarted && gameStarted && playerNationId === null) {
+        document.getElementById('main-menu-title').textContent = 'Choose Your Nation';
+        document.getElementById('main-menu-description').textContent = 'Choose an unclaimed nation to join your friends.';
+        document.getElementById('main-menu-overlay').hidden = false;
+    }
+    updateNationPanel();
+    setMapMode(mapMode);
+    setLeaderboardSort(lbSortCategory);
+    render();
+}
+
 function validateGameSave(state) {
     const isGrid = (value, validCell) => Array.isArray(value) &&
         value.length === HEIGHT &&
