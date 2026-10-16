@@ -19,4 +19,4 @@ Open the address printed by the server. Friends need to open the same public add
 2. In `js/multiplayer-config.js`, set `window.MULTIPLAYER_SERVER_URL` to that service URL, such as `https://your-service.example.com`.
 3. Publish the game files through GitHub Pages. Invite friends to the GitHub Pages address; they will connect to the lobby service configured above.
 
-Lobby codes exist only while the Node service is running. Each lobby supports up to six players. The host runs the simulation and relays the shared state.
+Lobby codes exist only while the Node service is running. Each lobby supports up to six players. The host runs the simulation at a fixed 1x speed and relays the shared state; Play/Pause and Simulation Speed controls are hidden for everyone until they leave the lobby.

@@ -123,10 +123,6 @@ wss.on('connection', socket => {
             broadcastRoster(room);
             return;
         }
-        if (message.type === 'speed' && socket.playerId !== room.hostId) {
-            const host = room.players.get(room.hostId);
-            if (host) send(host.socket, { type: 'speed-request', speed: Math.max(0, Math.min(5, Number(message.speed) || 0)) });
-        }
     });
     socket.on('close', () => leaveRoom(socket));
 });

@@ -862,6 +862,7 @@ function tick() {
         updateLeaderboard();
         lastLeaderboardUpdate = now;
     }
+    if (year % 2 === 0) window.multiplayer?.publishHostState();
 }
 
 // 4. COORDINATED ALLIANCE WARFARE & WEAKEST BORDER SELECTION

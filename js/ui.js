@@ -1506,14 +1506,19 @@ window.addEventListener('keydown', event => {
 
 // Speed Controls
 function setSpeed(speed) {
-    if (window.multiplayer?.connected && !window.multiplayer.isHost && !window.multiplayerApplying) {
-        window.multiplayer.requestSpeed(speed);
-        return;
+    const multiplayerActive = Boolean(window.multiplayer?.connected);
+    if (multiplayerActive) {
+        speed = gameStarted ? window.multiplayer.fixedSpeed : 0;
+        lastRunningSpeed = window.multiplayer.fixedSpeed;
     }
     if (speed > 0 && !gameStarted) speed = 0;
     if (speed > 0) lastRunningSpeed = speed;
+    const speedUnchanged = simSpeed === speed && (speed === 0 || tickInterval !== null);
     simSpeed = speed;
-    clearInterval(tickInterval);
+    if (!speedUnchanged) {
+        clearInterval(tickInterval);
+        tickInterval = null;
+    }
     
     ['btn-pause', 'btn-play', 'btn-1x', 'btn-2x', 'btn-5x'].forEach(id => {
         document.getElementById(id).classList.remove('active');
@@ -1526,9 +1531,11 @@ function setSpeed(speed) {
     document.getElementById('btn-play').disabled = !gameStarted || speed > 0;
     document.getElementById('btn-pause').disabled = speed === 0;
     
-    if (speed > 0) {
+    if (speed > 0 && (!multiplayerActive || window.multiplayer.isHost) && !speedUnchanged) {
         let intervalMs = 150 / speed;
-        tickInterval = setInterval(tick, intervalMs);
+        tickInterval = setInterval(() => {
+            if (!window.multiplayerApplyingRemoteState) tick();
+        }, intervalMs);
     }
 
     updateEmpireOverview();

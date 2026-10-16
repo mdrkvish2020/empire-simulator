@@ -1847,6 +1847,11 @@ select.map-select {
     right: 0;
 }
 
+body.multiplayer-active #turn-controls-panel,
+body.multiplayer-active #speed-controls-panel {
+    display: none !important;
+}
+
 .hud-customizable .btn {
     flex: 1 1 auto;
     white-space: normal;

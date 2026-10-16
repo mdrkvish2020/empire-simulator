@@ -17,6 +17,10 @@
     let actionTimer = null;
     let snapshotTimer = null;
     let leavingLobby = false;
+    let preLobbySpeed = 1;
+    let pendingPlayerState = false;
+    let pendingHostSnapshot = false;
+    let incomingPlayerStates = Promise.resolve();
 
     function showStatus(message, isError = false) {
         status.textContent = message;
@@ -66,11 +70,18 @@
                 currentCode = message.code;
                 myPlayerId = message.playerId;
                 host = Boolean(message.host);
+                document.body.classList.add('multiplayer-active');
+                preLobbySpeed = lastRunningSpeed || 1;
+                lastRunningSpeed = 1;
+                if (gameStarted) setSpeed(1);
                 codeDisplay.textContent = currentCode;
                 panel.hidden = false;
                 showStatus(host ? 'Lobby ready. Share the code with your friends.' : 'You joined the lobby. Choose a nation once the host starts the world.');
                 clearInterval(snapshotTimer);
-                if (host) snapshotTimer = setInterval(sendHostSnapshot, 900);
+                if (host) {
+                    snapshotTimer = setInterval(sendHostSnapshot, 900);
+                    sendHostSnapshot();
+                }
             } else if (message.type === 'roster') {
                 updateRoster(message.players);
             } else if (message.type === 'error') {
@@ -85,19 +96,24 @@
                     if (state.gameStarted && playerNationId === null) showStatus('Choose a nation on the map, then press Play as Nation.');
                 }).catch(error => console.error('Could not apply the shared game state.', error));
             } else if (message.type === 'player-state' && host) {
-                decodeGameSave(message.state).then(state => {
+                incomingPlayerStates = incomingPlayerStates.then(async () => {
+                    const state = await decodeGameSave(message.state);
                     if (gameStarted) state.gameStarted = true;
-                    state.lastRunningSpeed = lastRunningSpeed;
+                    state.lastRunningSpeed = window.multiplayer.fixedSpeed;
                     applying = true;
-                    applyMultiplayerGameState(state, simSpeed);
-                    applying = false;
+                    window.multiplayerApplyingRemoteState = true;
+                    try { applyMultiplayerGameState(state, window.multiplayer.fixedSpeed); }
+                    finally {
+                        window.multiplayerApplyingRemoteState = false;
+                        applying = false;
+                    }
                 }).catch(error => console.error('Could not apply a player action.', error));
-            } else if (message.type === 'speed-request' && host) {
-                setSpeed(message.speed);
             } else if (message.type === 'nation-claimed') {
                 updateRoster(message.players);
             } else if (message.type === 'promoted-host') {
                 host = true;
+                lastRunningSpeed = window.multiplayer.fixedSpeed;
+                if (gameStarted) setSpeed(window.multiplayer.fixedSpeed);
                 clearInterval(snapshotTimer);
                 snapshotTimer = setInterval(sendHostSnapshot, 900);
                 showStatus('The previous host left. You are now hosting this lobby.');
@@ -110,6 +126,9 @@
             myPlayerId = '';
             host = false;
             panel.hidden = true;
+            document.body.classList.remove('multiplayer-active');
+            lastRunningSpeed = preLobbySpeed;
+            if (gameStarted) setSpeed(lastRunningSpeed);
             leavingLobby = false;
         });
         socket.addEventListener('error', () => showStatus('Could not reach the lobby server. Start the app with npm start or check the hosted server.', true));
@@ -124,33 +143,49 @@
         return encodeGameSave(state);
     }
     async function sendHostSnapshot() {
-        if (!host || sendingState || socket?.readyState !== WebSocket.OPEN) return;
+        if (!host || socket?.readyState !== WebSocket.OPEN) return;
+        if (sendingState) { pendingHostSnapshot = true; return; }
         sendingState = true;
         try { send({ type: 'snapshot', state: await makeSharedState(), speed: simSpeed }); }
         catch (error) { console.error('Could not share the current game.', error); }
-        finally { sendingState = false; }
+        finally {
+            sendingState = false;
+            if (pendingHostSnapshot) {
+                pendingHostSnapshot = false;
+                queueMicrotask(sendHostSnapshot);
+            }
+        }
     }
     async function sendPlayerState() {
-        if (host || applying || socket?.readyState !== WebSocket.OPEN || sendingState) return;
+        if (host || applying || socket?.readyState !== WebSocket.OPEN) return;
+        if (sendingState) { pendingPlayerState = true; return; }
         sendingState = true;
         try { send({ type: 'player-state', state: await makeSharedState(), nationId: playerNationId }); }
         catch (error) { console.error('Could not send your action to the host.', error); }
-        finally { sendingState = false; }
+        finally {
+            sendingState = false;
+            if (pendingPlayerState) {
+                pendingPlayerState = false;
+                queuePlayerState();
+            }
+        }
     }
     function queuePlayerState() {
         if (!host && currentCode && !applying) {
             clearTimeout(actionTimer);
-            actionTimer = setTimeout(sendPlayerState, 120);
+            actionTimer = setTimeout(sendPlayerState, 0);
         }
     }
 
     window.multiplayerApplying = false;
+    window.multiplayerApplyingRemoteState = false;
     window.multiplayer = {
+        fixedSpeed: 1,
         get connected() { return Boolean(currentCode); },
         get isHost() { return host; },
         queuePlayerState,
+        publishHostState() { if (host) sendHostSnapshot(); },
         setNation(nationId) { send({ type: 'claim-nation', nationId }); },
-        requestSpeed(speed) { send({ type: 'speed', speed }); },
         isNationAvailable(nationId) {
             return !roster.some(player => player.id !== myPlayerId && Number(player.nationId) === Number(nationId));
         },
