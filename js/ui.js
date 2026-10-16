@@ -1,7 +1,9 @@
 // --- UI, CONTROLS, LEADERBOARD, & EVENTS ---
 
 const HUD_SETTINGS_KEY = 'agesOfConflictHudSettings';
+const MOBILE_HUD_SETTINGS_KEY = 'agesOfConflictMobileHudSettings';
 const SHORTCUTS_KEY = 'agesOfConflictShortcuts';
+const MOBILE_HUD_QUERY = '(max-width: 760px)';
 const HUD_POSITIONS = {
     'top-left': { left: '1vw', top: '1vh', transform: 'none' },
     'top-center': { left: '50%', top: '1vh', transform: 'translateX(-50%)' },
@@ -24,6 +26,13 @@ const DEFAULT_HUD_SETTINGS = {
         buttons: 90
     },
     'speed-controls-panel': { position: 'top-center', width: 8, height: 8, font: 85, buttons: 105 }
+};
+const DEFAULT_MOBILE_HUD_SETTINGS = {
+    'turn-controls-panel': { position: 'top-center', width: 16, height: 10, font: 70, buttons: 70 },
+    'selected-nation-details': { position: 'top-center', width: 63, height: 28, font: 75, buttons: 70 },
+    'leaderboard-modal': { position: 'top-left', width: 15, height: 15, font: 70, buttons: 70 },
+    'nation-panel': { position: 'bottom-center', width: 100, height: 23, font: 70, buttons: 70 },
+    'speed-controls-panel': { position: 'top-center', width: 8, height: 5, font: 70, buttons: 70 }
 };
 const DEFAULT_SHORTCUTS = {
     war: 'W',
@@ -75,7 +84,10 @@ const TUTORIAL_STEPS = [
 ];
 const hudFontBases = new WeakMap();
 const hudButtonBases = new WeakMap();
-let hudSettings = loadStoredSettings(HUD_SETTINGS_KEY, DEFAULT_HUD_SETTINGS);
+const desktopHudSettings = loadStoredSettings(HUD_SETTINGS_KEY, DEFAULT_HUD_SETTINGS);
+const mobileHudSettings = loadStoredSettings(MOBILE_HUD_SETTINGS_KEY, DEFAULT_MOBILE_HUD_SETTINGS);
+const mobileHudMedia = window.matchMedia(MOBILE_HUD_QUERY);
+let hudSettings = mobileHudMedia.matches ? mobileHudSettings : desktopHudSettings;
 let gameShortcuts = loadStoredSettings(SHORTCUTS_KEY, DEFAULT_SHORTCUTS);
 let tutorialStepIndex = 0;
 let tutorialResumeAfterClose = false;
@@ -247,15 +259,17 @@ function applyHudPanelSettings(panelId) {
     if (!panel || !settings) return;
 
     const position = HUD_POSITIONS[settings.position] || HUD_POSITIONS['top-left'];
-    const useSelectionPanelHeight = panelId === 'nation-panel' &&
+    const activeDefaults = mobileHudMedia.matches ? DEFAULT_MOBILE_HUD_SETTINGS : DEFAULT_HUD_SETTINGS;
+    const useSelectionPanelHeight = panelId === 'nation-panel' && !mobileHudMedia.matches &&
         playerNationId === null &&
-        settings.height === DEFAULT_HUD_SETTINGS['nation-panel'].height;
+        settings.height === activeDefaults['nation-panel'].height;
     panel.style.position = 'absolute';
     panel.style.width = `${settings.width}vw`;
-    panel.style.height = panelId === 'leaderboard-modal' || useSelectionPanelHeight
+    panel.style.height = panelId === 'leaderboard-modal' || useSelectionPanelHeight ||
+        (panelId === 'nation-panel' && panel.classList.contains('is-minimized'))
         ? 'auto'
         : `${settings.height}vh`;
-    panel.style.maxWidth = '98vw';
+    panel.style.maxWidth = '100vw';
     panel.style.maxHeight = panelId === 'leaderboard-modal' ? `${settings.height}vh` : '96vh';
     panel.style.left = position.left || 'auto';
     panel.style.right = position.right || 'auto';
@@ -277,6 +291,19 @@ function initializeSettings() {
         `<option value="${position}">${position.replace('-', ' ').replace(/\b\w/g, letter => letter.toUpperCase())}</option>`
     ).join('');
 
+    function syncPanelSettingInputs() {
+        hudSettings = mobileHudMedia.matches ? mobileHudSettings : desktopHudSettings;
+        document.querySelectorAll('.panel-setting').forEach(fieldset => {
+            const settings = hudSettings[fieldset.dataset.hudPanel];
+            fieldset.querySelectorAll('[data-setting]').forEach(input => {
+                const setting = input.dataset.setting;
+                input.value = settings[setting];
+                updateSettingOutput(fieldset, setting, settings[setting]);
+            });
+        });
+        applyAllHudSettings();
+    }
+
     document.querySelectorAll('.panel-setting').forEach(fieldset => {
         const panelId = fieldset.dataset.hudPanel;
         const settings = hudSettings[panelId];
@@ -289,7 +316,7 @@ function initializeSettings() {
                 settings[setting] = setting === 'position' ? input.value : Number(input.value);
                 updateSettingOutput(fieldset, setting, settings[setting]);
                 applyHudPanelSettings(panelId);
-                saveStoredSettings(HUD_SETTINGS_KEY, hudSettings);
+                saveStoredSettings(mobileHudMedia.matches ? MOBILE_HUD_SETTINGS_KEY : HUD_SETTINGS_KEY, hudSettings);
             });
         });
     });
@@ -313,6 +340,8 @@ function initializeSettings() {
                 .observe(panel, { childList: true, subtree: true });
         }
     });
+    mobileHudMedia.addEventListener?.('change', syncPanelSettingInputs);
+    if (!mobileHudMedia.addEventListener) mobileHudMedia.addListener(syncPanelSettingInputs);
     applyAllHudSettings();
 }
 
@@ -658,6 +687,7 @@ function setNationPanelMinimized(minimized) {
     const panel = document.getElementById('nation-panel');
     const toggle = document.getElementById('nation-panel-toggle');
     panel.classList.toggle('is-minimized', minimized);
+    applyHudPanelSettings('nation-panel');
     toggle.setAttribute('aria-expanded', String(!minimized));
     toggle.setAttribute('aria-label', minimized ? 'Expand nation controls' : 'Minimize nation controls');
     toggle.title = minimized ? 'Expand nation controls' : 'Minimize nation controls';
@@ -1402,7 +1432,10 @@ document.getElementById('settings-overlay').addEventListener('click', event => {
     if (event.target.id === 'settings-overlay') closeSettings();
 });
 document.getElementById('settings-reset').addEventListener('click', () => {
-    hudSettings = JSON.parse(JSON.stringify(DEFAULT_HUD_SETTINGS));
+    const mobile = mobileHudMedia.matches;
+    const defaults = mobile ? DEFAULT_MOBILE_HUD_SETTINGS : DEFAULT_HUD_SETTINGS;
+    hudSettings = mobile ? mobileHudSettings : desktopHudSettings;
+    Object.assign(hudSettings, JSON.parse(JSON.stringify(defaults)));
     gameShortcuts = { ...DEFAULT_SHORTCUTS };
     document.querySelectorAll('.panel-setting').forEach(fieldset => {
         const settings = hudSettings[fieldset.dataset.hudPanel];
@@ -1414,7 +1447,7 @@ document.getElementById('settings-reset').addEventListener('click', () => {
     document.querySelectorAll('.shortcut-input').forEach(input => {
         input.value = gameShortcuts[input.dataset.shortcut];
     });
-    saveStoredSettings(HUD_SETTINGS_KEY, hudSettings);
+    saveStoredSettings(mobile ? MOBILE_HUD_SETTINGS_KEY : HUD_SETTINGS_KEY, hudSettings);
     saveStoredSettings(SHORTCUTS_KEY, gameShortcuts);
     applyAllHudSettings();
 });
